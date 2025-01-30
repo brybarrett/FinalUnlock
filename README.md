@@ -33,10 +33,10 @@
    python3 -m venv venv
    source venv/bin/activate  # 激活虚拟环境
    
-   2.安装所需的依赖
-   ```
+   
 
-​      
+​  2.安装所需的依赖
+   ```    
 
 ```
  pip install python-telegram-bot==20.8 pycryptodome==3.20.0
