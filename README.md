@@ -2,6 +2,8 @@
 
 该项目是一个 Telegram Bot，旨在提供 FinalShell 的离线激活码生成工具。用户可以通过输入机器码来获取相应的激活码。
 # FinalShell最高支持版本4.3.10
+
+ Demo：@FinalUnlock_bot
  
 ## 特性
 
