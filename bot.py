@@ -65,11 +65,11 @@ def get_log_filename():
 # 欢迎命令 /start
 async def start_command(update: Update, _):
     welcome_text = (
-        "🎉 _欢迎使用 FinalShell 离线激活码生成工具_ 🎉\n"
-        "📌 _请确认 FinalShell 版本最高为 4.3.10_\n\n"
-        "⚠ _请按照规定合理使用，严禁倒卖行为_ ⚠\n"
-        "🚨 _如果发现滥用行为，将立刻停止你的使用权限_ 🚨\n\n"
-        "🔹 _请发送你的机器码，我会帮你计算激活码！_"
+        "🎉 *欢迎使用 FinalShell 离线激活码生成工具* 🎉\n"
+        "📌 *请确认 FinalShell 版本最高为 4.3.10*\n\n"
+        "⚠ *请按照规定合理使用，严禁倒卖行为* ⚠\n"
+        "🚨 *如果发现滥用行为，将立刻停止你的使用权限* 🚨\n\n"
+        "🔹 *请发送你的机器码，我会帮你计算激活码！*"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
