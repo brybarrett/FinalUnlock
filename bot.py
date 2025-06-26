@@ -1,248 +1,257 @@
-import json
-import datetime
-import logging
 import os
-from Crypto.Hash import keccak, MD5
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from dotenv import load_dotenv
+import importlib.util
+import json
+import logging
+from datetime import datetime
+from telegram.error import TelegramError
 
-# 配置日志记录
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 加载 .env 文件
+load_dotenv()
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# 读取配置文件
-with open("config.json", "r", encoding="utf-8") as f:
-    config = json.load(f)
+def today_str():
+    return datetime.now().strftime('%Y%m%d')
 
-TOKEN = config.get("TOKEN")
-ADMIN_ID = config.get("ADMIN_ID")  # 确保 ADMIN_ID 是 int
-BLACKLIST = set(config.get("BLACKLIST", []))
-usage_data = config.get("usage_data", {})
-violation_attempts = config.get("violation_attempts", {})
+# 日志配置
+logging.basicConfig(
+    filename='bot.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-# 统计数据结构
-stats_data = {
-    "total_users_today": 0,
-    "banned_users": 0,
-    "unbanned_users": 0,
-    "usage_details": {}  # 用于详细记录每个用户的使用次数
-}
+# 数据文件名函数
+STATS_FILE = lambda: f'stats_{today_str()}.json'
+BAN_FILE = lambda: f'ban_{today_str()}.json'
+TRY_FILE = lambda: f'try_{today_str()}.json'
 
-# 计算 MD5 哈希
-def md5(msg):
-    hash_obj = MD5.new(msg)
-    return hash_obj.hexdigest()
+# 加载和保存json
 
-# 计算 Keccak-384 哈希
-def keccak384(msg):
-    hash_obj = keccak.new(data=msg, digest_bits=384)
-    return hash_obj.hexdigest()
+def load_json(filename, default):
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return default
 
-# 生成激活码
-def generate_activation_codes(code):
-    # 旧版激活码计算
-    old_pro = md5(f'61305{code}8552'.encode())[8:24]
-    old_professional = md5(f'2356{code}13593'.encode())[8:24]
-    # 新版激活码计算
-    new_pro = keccak384(f'{code}hSf(78cvVlS5E'.encode())[12:28]
-    new_professional = keccak384(f'{code}FF3Go(*Xvbb5s2'.encode())[12:28]
+def save_json(filename, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # Markdown 格式输出
-    response = (
-        "*版本号 < 3.9.6 (旧版)*\n"
-        f"🔹 _高级版_: `{old_pro}`\n"
-        f"🔸 _专业版_: `{old_professional}`\n\n"
-        "*版本号 >= 3.9.6 (新版)*\n"
-        f"🔹 _高级版_: `{new_pro}`\n"
-        f"🔸 _专业版_: `{new_professional}`"
-    )
-    return response
+# 统计、黑名单、尝试次数
+stats = load_json(STATS_FILE(), {})
+ban_list = set(load_json(BAN_FILE(), []))
+try_count = load_json(TRY_FILE(), {})
 
-# 获取当前日期，用于文件名
-def get_log_filename():
-    today = datetime.date.today().isoformat()
-    return f"log_{today}.txt"
+def is_admin(user_id):
+    admin_ids = [i.strip() for i in (os.getenv('CHAT_ID') or '').split(',') if i.strip()]
+    return str(user_id) in admin_ids
 
-# 欢迎命令 /start
-async def start_command(update: Update, _):
-    welcome_text = (
-        "🎉 *欢迎使用 FinalShell 离线激活码生成工具* 🎉\n"
-        "📌 *请确认 FinalShell 版本最高为 4.3.10*\n\n"
-        "⚠ *请按照规定合理使用，严禁倒卖行为* ⚠\n"
-        "🚨 *如果发现滥用行为，将立刻停止你的使用权限* 🚨\n\n"
-        "🔹 *请发送你的机器码，我会帮你计算激活码！*"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+def handle_admin_try(user_id):
+    user_id = str(user_id)
+    try_count[user_id] = try_count.get(user_id, 0) + 1
+    save_json(TRY_FILE(), try_count)
+    if try_count[user_id] >= 3:
+        ban_list.add(user_id)
+        save_json(BAN_FILE(), list(ban_list))
+        return True  # 已拉黑
+    return False
 
-# 获取帮助信息 /help
-async def help_command(update: Update, _):
+# 动态导入 py.py 的 show_activation_codes 函数
+def get_show_activation_codes():
+    spec = importlib.util.spec_from_file_location('py', os.path.join(os.path.dirname(__file__), 'py.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError('无法加载 py.py 模块')
+    py = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(py)
+    return py.show_activation_codes
+
+show_activation_codes = get_show_activation_codes()
+
+# 指令处理
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if stats.get(f'start_{user_id}', 0) == 0:
+        await update.message.reply_text('👋 欢迎使用 FinalShell 激活码机器人，已更新可支持4.6.5版本！\n请输入机器码获取激活码。')
+        stats[f'start_{user_id}'] = 1
+        save_json(STATS_FILE(), stats)
+    else:
+        await update.message.reply_text('你已使用过本机器人，直接输入机器码即可获取激活码。')
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📚 _帮助信息_:\n"
-        "➡ `/start` - 显示欢迎信息\n"
-        "➡ `/help` - 获取帮助信息\n"
-        "➡ `/stats` - 查看统计数据\n"
-        "➡ `/ban <用户ID>` - 拉黑用户\n"
-        "➡ `/unban <用户ID>` - 解除拉黑\n"
-        "➡ `/clear` - 清除所有计数器数据\n"
-        "➡ `/cleanup` - 清除日志文件\n"
-        "🔹 _请遵守使用规范，合理使用该服务。_"
+        '📚 帮助信息:\n'
+        '➡️ /start - 欢迎使用\n'
+        '➡️ /help - 帮助信息\n'
+        '➡️ 直接向我发送机器码\n'
+        '➡️ 我会计算并返回激活码\n'
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(help_text)
 
-# 查看统计数据 /stats
-async def stats_command(update: Update, _):
-    user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⚠ 你没有权限查看统计数据。")
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
         return
+    msg_lines = []
+    for k, v in stats.items():
+        if k.startswith('start_'):
+            continue
+        # v 可能是 int 或 dict
+        if isinstance(v, dict):
+            count = v.get('count', 0)
+            last_time = v.get('last_time', '')
+        else:
+            count = v
+            last_time = ''
+        msg_lines.append(f"{k}: {count} {last_time}")
+    msg = '\n'.join(msg_lines) or '暂无统计数据。'
+    await update.message.reply_text(f'📊 统计数据:\n{msg}')
 
-    # 获取今日日期
-    today = datetime.date.today().isoformat()
-
-    # 拉黑和解封用户的数量
-    banned_users = stats_data.get("banned_users", 0)
-    unbanned_users = stats_data.get("unbanned_users", 0)
-
-    usage_details = "\n".join([
-        f"用户 ID: {user} - 使用次数: {count}"
-        for user, count in stats_data["usage_details"].items()
-    ]) or "暂无使用记录"
-
-    stats_text = (
-        "*统计数据*:\n"
-        f"🔹 今日使用用户数: {stats_data['total_users_today']}\n"
-        f"🔸 拉黑用户总数: {banned_users}\n"
-        f"🔹 解封用户总数: {unbanned_users}\n\n"
-        f"🔍 使用详情:\n{usage_details}"
-    )
-
-    await update.message.reply_text(stats_text, parse_mode="Markdown")
-
-    # 将统计数据保存到带日期的 log 文件中
-    log_filename = get_log_filename()
-    with open(log_filename, "a", encoding="utf-8") as log_file:
-        log_entry = (
-            f"日期: {today}\n"
-            f"今日使用用户数: {stats_data['total_users_today']}\n"
-            f"拉黑用户总数: {banned_users}\n"
-            f"解封用户总数: {unbanned_users}\n"
-            f"使用详情:\n{usage_details}\n"
-            "----------------------\n"
-        )
-        log_file.write(log_entry)
-        logging.info(f"统计数据已保存到 {log_filename}: {log_entry}")  # 记录日志
-
-# 拉黑用户 /ban <用户ID>
-async def ban_command(update: Update, context):
-    user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⚠ 你没有权限执行此命令。")
+async def ban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
         return
     if len(context.args) != 1:
-        await update.message.reply_text("使用方法: `/ban <用户ID>`")
+        await update.message.reply_text('用法: /ban <用户ID>')
         return
-    user_to_ban = context.args[0]
-    BLACKLIST.add(user_to_ban)
-    config["BLACKLIST"] = list(BLACKLIST)
-    # 更新统计数据
-    stats_data["banned_users"] += 1
-    await update.message.reply_text(f"用户 `{user_to_ban}` 已被拉黑。")
-    logging.info(f"用户 {user_to_ban} 被拉黑。")  # 记录日志
-    # 保存配置
-    with open("config.json", "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
+    ban_id = context.args[0]
+    ban_list.add(ban_id)
+    save_json(BAN_FILE(), list(ban_list))
+    await update.message.reply_text(f'已拉黑用户 {ban_id}')
 
-# 解除拉黑 /unban <用户ID>
-async def unban_command(update: Update, context):
-    user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⚠ 你没有权限执行此命令。")
+async def unban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
         return
     if len(context.args) != 1:
-        await update.message.reply_text("使用方法: `/unban <用户ID>`")
+        await update.message.reply_text('用法: /unban <用户ID>')
         return
-    user_to_unban = context.args[0]
-    if user_to_unban in BLACKLIST:
-        BLACKLIST.remove(user_to_unban)
-        config["BLACKLIST"] = list(BLACKLIST)
-        # 更新统计数据
-        stats_data["unbanned_users"] += 1
-        await update.message.reply_text(f"用户 `{user_to_unban}` 已被解除拉黑。")
-        logging.info(f"用户 {user_to_unban} 被解除拉黑。")  # 记录日志
-        # 保存配置
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+    ban_id = context.args[0]
+    ban_list.discard(ban_id)
+    save_json(BAN_FILE(), list(ban_list))
+    await update.message.reply_text(f'已解除拉黑用户 {ban_id}')
+
+async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
+        return
+    stats.clear()
+    save_json(STATS_FILE(), stats)
+    await update.message.reply_text('所有计数器数据已清除。')
+
+async def cleanup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
+        return
+    if os.path.exists('bot.log'):
+        os.remove('bot.log')
+        await update.message.reply_text('日志文件已清除。')
     else:
-        await update.message.reply_text(f"用户 `{user_to_unban}` 不在黑名单中。")
+        await update.message.reply_text('没有日志文件可清除。')
 
-# 清除计数器数据 /clear
-async def clear_command(update: Update, _):
-    user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⚠ 你没有权限执行此命令。")
+# 激活码自动生成
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if user_id in ban_list:
+        await update.message.reply_text('你已被拉黑，无法使用本服务。')
         return
-    global violation_attempts, BLACKLIST, stats_data  # 声明使用全局变量
-    # 清空违规尝试计数器和黑名单
-    violation_attempts = {}
-    BLACKLIST.clear()
-    stats_data = {"total_users_today": 0, "banned_users": 0, "unbanned_users": 0, "usage_details": {}}  # 清零统计数据
-    config["violation_attempts"] = violation_attempts
-    config["BLACKLIST"] = list(BLACKLIST)
-    config["stats_data"] = stats_data  # 更新统计数据
-    await update.message.reply_text("✅ 所有计数器和黑名单数据已被清除。")
-    logging.info("所有计数器和黑名单数据已被清除。")  # 记录日志
-    # 更新配置文件
-    with open("config.json", "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
-
-# 清除日志文件 /cleanup
-async def cleanup_command(update: Update, _):
-    user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("⚠ 你没有权限执行此命令。")
-        return
-
-    # 查找所有以 log_ 开头的文件并删除
-    log_deleted = False
-    for filename in os.listdir("."):
-        if filename.startswith("log_") and filename.endswith(".txt"):
-            os.remove(filename)
-            log_deleted = True
-            logging.info(f"日志文件 {filename} 已被删除。")
-
-    if log_deleted:
-        await update.message.reply_text("✅ 所有日志文件已被清除。")
+    # 管理员不计数
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if not is_admin(user_id):
+        v = stats.get(user_id, {'count': 0, 'last_time': ''})
+        if isinstance(v, int):
+            v = {'count': v, 'last_time': ''}
+        v['count'] = v.get('count', 0) + 1
+        v['last_time'] = now_str
+        stats[user_id] = v
+        save_json(STATS_FILE(), stats)
+        if v['count'] > 3:
+            ban_list.add(user_id)
+            save_json(BAN_FILE(), list(ban_list))
+            await update.message.reply_text('你已超过免费使用次数，如需继续使用请联系管理员。')
+            return
     else:
-        await update.message.reply_text("⚠ 没有找到日志文件。")
-
-# 处理用户输入机器码
-async def handle_message(update: Update, _):
-    user_id = update.message.from_user.id
-    if str(user_id) in BLACKLIST:
-        await update.message.reply_text("🚫 你已被禁止使用此服务，请联系管理员。")
+        # 管理员也记录时间和次数
+        v = stats.get(user_id, {'count': 0, 'last_time': ''})
+        if isinstance(v, int):
+            v = {'count': v, 'last_time': ''}
+        v['count'] = v.get('count', 0) + 1
+        v['last_time'] = now_str
+        stats[user_id] = v
+        save_json(STATS_FILE(), stats)
+    machine_id = update.message.text.strip()
+    # 捕获输出
+    import io, sys
+    buf = io.StringIO()
+    sys_stdout = sys.stdout
+    sys.stdout = buf
+    try:
+        show_activation_codes(machine_id)
+    except Exception as e:
+        await update.message.reply_text(f'生成激活码出错: {e}')
+        sys.stdout = sys_stdout
         return
+    sys.stdout = sys_stdout
+    result = buf.getvalue()
+    await update.message.reply_text(result)
+    logging.info(f"用户{user_id}请求激活码，机器码: {machine_id}")
 
-    # 增加今日用户使用统计
-    stats_data["total_users_today"] += 1
-    stats_data["usage_details"][user_id] = stats_data["usage_details"].get(user_id, 0) + 1
-    logging.info(f"用户 {user_id} 输入了机器码，当前使用人数: {stats_data['total_users_today']}")
+async def say_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
+        return
+    if not context.args:
+        await update.message.reply_text('用法: /say <要广播的内容>')
+        return
+    msg = ' '.join(context.args)
+    sent = 0
+    failed = 0
+    for uid in stats:
+        if uid.startswith('start_'):
+            continue
+        try:
+            await context.bot.send_message(chat_id=uid, text=msg)
+            sent += 1
+        except TelegramError:
+            failed += 1
+    await update.message.reply_text(f'广播完成，成功：{sent}，失败：{failed}')
 
-    code = update.message.text.strip()
-    activation_codes = generate_activation_codes(code)
-    await update.message.reply_text(activation_codes, parse_mode="Markdown")
-
-# 运行 bot
-def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("ban", ban_command))
-    app.add_handler(CommandHandler("unban", unban_command))
-    app.add_handler(CommandHandler("clear", clear_command))
-    app.add_handler(CommandHandler("cleanup", cleanup_command))  # 添加清除日志文件的命令
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))  # 处理消息
-    logging.info("✅ Bot 正在运行...")  # 记录日志
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('help', help_cmd))
+    app.add_handler(CommandHandler('stats', stats_cmd))
+    app.add_handler(CommandHandler('ban', ban_cmd))
+    app.add_handler(CommandHandler('unban', unban_cmd))
+    app.add_handler(CommandHandler('clear', clear_cmd))
+    app.add_handler(CommandHandler('cleanup', cleanup_cmd))
+    app.add_handler(CommandHandler('say', say_cmd))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    print('Bot 运行ing...')
+    app.run_polling() 

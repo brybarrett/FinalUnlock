@@ -1,123 +1,79 @@
-# FinalShell 离线激活码生成工具
+# FinalShell 激活码 Telegram 机器人
 
-该项目是一个 Telegram Bot，旨在提供 FinalShell 的离线激活码生成工具。用户可以通过输入机器码来获取相应的激活码。
-# FinalShell最高支持版本4.3.10
+## 项目简介
 
- Demo：https://t.me/FinalUnlock_bot
- 
- # 2025-02-05 22:50:34 更新内容
- # 添加/stats命令会显示更为详细的统计信息，具体以bot回复为准； 
- # 添加/cleanup命令，清除以log开头.txt结尾的日志文件；
- 
-## 特性
+本项目是一个基于 Python 的 Telegram 机器人，支持自动生成 FinalShell 各版本激活码，并提供用户管理、统计、广播等功能。适用于个人或团队自动化分发激活码、用户管理等场景。
 
-- 用户可以输入机器码生成激活码。
-- 管理员可以管理用户，包括拉黑和解封用户。
-- 提供统计数据追踪功能，包括今日使用的用户数、拉黑用户数、解封用户数等。
-- 日志记录功能，将统计信息保存到文件，便于日后查看。
+## 功能列表
+- 支持 FinalShell 多版本激活码自动生成
+- 支持 Telegram 机器人常用指令
+- 管理员权限控制与黑名单机制
+- 用户使用次数限制与自动拉黑
+- 统计数据、黑名单、操作日志本地持久化，按天分文件
+- 管理员可向所有用户广播消息
 
-## 功能命令
+## 依赖安装
 
-- `/start` - 显示欢迎信息
-- `/help` - 获取帮助信息
-- `/stats` - 查看统计数据
-- `/ban <用户ID>` - 拉黑用户
-- `/unban <用户ID>` - 解除拉黑
-- `/clear` - 清除所有计数器数据
+请确保已安装 Python 3.7 及以上版本。
 
-## 安装与运行
+安装依赖：
 
-### 环境要求
+```bash
+pip install python-telegram-bot python-dotenv pycryptodome
+```
 
-- Python 3.6 或更高版本
-- 依赖库: `python-telegram-bot, pycryptodome`
+或使用 requirements.txt：
 
-### 安装依赖库
+```bash
+pip install -r requirements.txt
+```
 
-1. **创建 Python 虚拟环境**:
+## 环境配置
 
+在项目根目录下新建 `.env` 文件，内容如下：
+
+```
+BOT_TOKEN=你的bot token
+CHAT_ID=管理员的Telegram用户ID（多个用英文逗号分隔）
+```
+
+- `BOT_TOKEN`：在 @BotFather 创建机器人后获得
+- `CHAT_ID`：管理员的 Telegram 用户ID，可通过 @userinfobot 获取
+
+## 运行方法
+
+1. 启动 bot：
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # 激活虚拟环境
+   python bot.py
    ```
+2. 用户在 Telegram 中与 bot 对话，发送 `/start` 或机器码即可使用。
 
-​     
+## 主要命令说明
 
-2.安装所需的依赖 
+- `/start`  首次欢迎信息，后续提示直接输入机器码
+- `/help`   获取帮助信息
+- `/stats`  查看统计数据（仅管理员）
+- `/ban <用户ID>`   拉黑用户（仅管理员）
+- `/unban <用户ID>`  解除拉黑（仅管理员）
+- `/clear`  清除所有计数器数据（仅管理员）
+- `/cleanup`  清除日志文件（仅管理员）
+- `/say <内容>`  向所有用过 bot 的用户广播信息（仅管理员）
 
-```
- pip install python-telegram-bot==20.8 pycryptodome==3.20.0
-```
+## 数据文件说明
 
+- `stats_YYYYMMDD.json`：统计数据，记录每个用户的使用次数和最后一次使用时间
+- `ban_YYYYMMDD.json`：黑名单数据，记录被拉黑的用户ID
+- `try_YYYYMMDD.json`：普通用户尝试管理员命令的计数
+- `bot.log`：操作日志
 
+## 注意事项
 
-###  配置
+- 只有管理员（.env 配置的 CHAT_ID）可使用管理类命令
+- 普通用户每个ID最多只能生成三次激活码，超限自动拉黑
+- 管理员不受次数限制
+- 只有和 bot 聊天过的用户才能收到广播
+- 统计、黑名单等数据每日自动分文件保存，便于管理和追溯
 
-​     在项目目录下创建 `config.json` 文件，内容示例如下：
+## 贡献与反馈
 
-```
-{
-   "TOKEN": "YOUR_TELEGRAM_BOT_TOKEN",
-   "ADMIN_ID": Telegram ID,  // 管理员的 Telegram ID
-   "BLACKLIST": [],
-   "usage_data": {},
-   "violation_attempts": {},
-   "stats_data": {
-      "total_users_today": 0,
-      "banned_users": 0,
-      "unbanned_users": 0
-   }
-}
-```
-
-
-
-请确保将 `YOUR_TELEGRAM_BOT_TOKEN` 替换为您创建的 Telegram Bot 的令牌
-
-
-
-### 运行项目
-
-
-
-**在虚拟环境中启动程序** 
-
-```
-python bot.py
-```
-
-
-
-后台运行
-
-```
-nohup python bot.py &
-```
-
-
-
-
-
-### 日志
-
-- 统计数据将保存到以日期命名的 `log_YYYY-MM-DD.txt` 文件中（例如：`log_2023-09-15.txt`），每次调用 `/stats` 命令时追加统计信息。
-
-## 项目结构
-
-.
-
-```
-├── bot.py             # 主应用文件
-├── config.json        # 配置文件
-└── log_YYYY-MM-DD.txt # 每日统计日志文件
-```
-
-
-
-## 贡献
-
-欢迎对项目进行贡献！如果您有建议或发现问题，您可以提交问题或拉取请求。
-
-## 许可证
-
-该项目根据 MIT 许可证提供。今天的代码和相关文件仅用于学习和研究目的，请遵循相应的软件协议。
+如有建议或问题，欢迎提交 issue 或 PR。 
