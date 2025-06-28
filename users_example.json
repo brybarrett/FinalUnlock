@@ -1,0 +1,29 @@
+{
+  "123456789": {
+    "first_seen": "2024-01-15 10:30:25",
+    "last_seen": "2024-01-15 14:22:10",
+    "username": "example_user",
+    "first_name": "张三",
+    "last_name": "",
+    "total_requests": 5,
+    "is_banned": false
+  },
+  "987654321": {
+    "first_seen": "2024-01-15 09:15:30",
+    "last_seen": "2024-01-15 16:45:20",
+    "username": "test_user",
+    "first_name": "李四",
+    "last_name": "王",
+    "total_requests": 12,
+    "is_banned": true
+  },
+  "555666777": {
+    "first_seen": "2024-01-15 11:20:15",
+    "last_seen": "2024-01-15 11:20:15",
+    "username": null,
+    "first_name": "王五",
+    "last_name": "",
+    "total_requests": 1,
+    "is_banned": false
+  }
+} 

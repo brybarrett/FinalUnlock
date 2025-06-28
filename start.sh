@@ -1297,7 +1297,8 @@ check_venv() {
 uninstall_bot() {
     print_message $BLUE "🗑️ 卸载机器人..."
     
-    print_message $RED "⚠️ 这将停止机器人并强制删除 FinalUnlock 目录及其所有文件"
+    print_message $RED "⚠️ 这将停止机器人并强制删除所有 FinalUnlock 相关目录及文件"
+    print_message $RED "⚠️ 包括: FinalUnlock, FinalUnlock.backup.* 等所有相关目录"
     print_message $RED "⚠️ 此操作不可逆，请谨慎操作！"
     echo
     read -p "请输入 'yes' 确认删除: " confirm
@@ -1322,8 +1323,21 @@ uninstall_bot() {
         print_message $GREEN "✅ 全局命令 fn-bot 已删除"
     fi
     
-    # 强制删除 FinalUnlock 目录及其所有文件
-    print_message $YELLOW "🔄 正在删除 FinalUnlock 目录..."
+    # 删除本地命令
+    local local_bin="$HOME/.local/bin"
+    if [ -f "$local_bin/fn-bot" ]; then
+        print_message $YELLOW "🔄 正在删除本地命令 fn-bot..."
+        rm -f "$local_bin/fn-bot"
+        print_message $GREEN "✅ 本地命令 fn-bot 已删除"
+    fi
+    
+    # 删除桌面快捷方式
+    local desktop_file="$HOME/.local/share/applications/finalshell-bot.desktop"
+    if [ -f "$desktop_file" ]; then
+        print_message $YELLOW "🔄 正在删除桌面快捷方式..."
+        rm -f "$desktop_file"
+        print_message $GREEN "✅ 桌面快捷方式已删除"
+    fi
     
     # 获取项目目录的父目录
     local parent_dir=$(dirname "$PROJECT_DIR")
@@ -1332,18 +1346,35 @@ uninstall_bot() {
     # 切换到父目录
     cd "$parent_dir"
     
-    # 强制删除整个项目目录
-    rm -rf "$project_name"
+    # 删除所有FinalUnlock相关目录
+    print_message $YELLOW "🔄 正在删除所有 FinalUnlock 相关目录..."
     
-    if [ $? -eq 0 ]; then
-        print_message $GREEN "✅ FinalUnlock 目录已完全删除"
-        print_message $YELLOW "脚本将在3秒后退出..."
-        sleep 3
-        emergency_exit
-    else
-        print_message $RED "❌ 删除失败，请手动删除"
-        emergency_exit
+    # 删除主目录
+    if [ -d "$project_name" ]; then
+        rm -rf "$project_name"
+        print_message $GREEN "✅ FinalUnlock 主目录已删除"
     fi
+    
+    # 删除所有备份目录
+    for backup_dir in "$project_name".backup.*; do
+        if [ -d "$backup_dir" ]; then
+            rm -rf "$backup_dir"
+            print_message $GREEN "✅ 备份目录 $backup_dir 已删除"
+        fi
+    done
+    
+    # 删除可能的其他相关目录
+    for related_dir in *FinalUnlock*; do
+        if [ -d "$related_dir" ] && [ "$related_dir" != "$project_name" ]; then
+            rm -rf "$related_dir"
+            print_message $GREEN "✅ 相关目录 $related_dir 已删除"
+        fi
+    done
+    
+    print_message $GREEN "✅ 所有 FinalUnlock 相关目录已完全删除"
+    print_message $YELLOW "脚本将在3秒后退出..."
+    sleep 3
+    emergency_exit
 }
 
 # 日志管理功能
@@ -1550,6 +1581,16 @@ show_menu() {
     echo
 }
 
+# 快速检查依赖（不安装）
+quick_check_dependencies() {
+    # 检查主要依赖是否已安装
+    if $PYTHON_CMD -c "import telegram, dotenv, Crypto" 2>/dev/null; then
+        return 0  # 所有依赖都已安装
+    else
+        return 1  # 有依赖缺失
+    fi
+}
+
 # 主函数
 main() {
     # 显示欢迎信息
@@ -1595,10 +1636,16 @@ main() {
         exit 1
     fi
     
-    install_dependencies
-    if [ $? -ne 0 ]; then
-        print_message $RED "❌ 依赖安装失败"
-        exit 1
+    # 快速检查依赖，只在缺失时才安装
+    if ! quick_check_dependencies; then
+        print_message $YELLOW "⚠️ 检测到缺失依赖，正在安装..."
+        install_dependencies
+        if [ $? -ne 0 ]; then
+            print_message $RED "❌ 依赖安装失败"
+            exit 1
+        fi
+    else
+        print_message $GREEN "✅ 依赖检查通过"
     fi
     
     # 检查环境配置

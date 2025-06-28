@@ -27,6 +27,7 @@ logging.basicConfig(
 STATS_FILE = lambda: f'stats_{today_str()}.json'
 BAN_FILE = lambda: f'ban_{today_str()}.json'
 TRY_FILE = lambda: f'try_{today_str()}.json'
+USERS_FILE = 'users.json'  # 用户记录文件
 
 # 加载和保存json
 
@@ -40,10 +41,46 @@ def save_json(filename, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# 统计、黑名单、尝试次数
+# 统计、黑名单、尝试次数、用户记录
 stats = load_json(STATS_FILE(), {})
 ban_list = set(load_json(BAN_FILE(), []))
 try_count = load_json(TRY_FILE(), {})
+users = load_json(USERS_FILE, {})  # 用户记录
+
+def record_user(user_id, username=None, first_name=None, last_name=None):
+    """记录用户信息"""
+    user_id = str(user_id)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if user_id not in users:
+        users[user_id] = {
+            'first_seen': now_str,
+            'last_seen': now_str,
+            'username': username,
+            'first_name': first_name,
+            'last_name': last_name,
+            'total_requests': 0,
+            'is_banned': False
+        }
+    else:
+        users[user_id]['last_seen'] = now_str
+        if username:
+            users[user_id]['username'] = username
+        if first_name:
+            users[user_id]['first_name'] = first_name
+        if last_name:
+            users[user_id]['last_name'] = last_name
+    
+    save_json(USERS_FILE, users)
+
+def update_user_stats(user_id, is_banned=False):
+    """更新用户统计信息"""
+    user_id = str(user_id)
+    if user_id in users:
+        users[user_id]['total_requests'] = users[user_id].get('total_requests', 0) + 1
+        users[user_id]['is_banned'] = is_banned
+        users[user_id]['last_seen'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        save_json(USERS_FILE, users)
 
 def is_admin(user_id):
     admin_ids = [i.strip() for i in (os.getenv('CHAT_ID') or '').split(',') if i.strip()]
@@ -73,6 +110,15 @@ show_activation_codes = get_show_activation_codes()
 # 指令处理
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
+    
+    # 记录用户信息
+    record_user(
+        user_id, 
+        update.effective_user.username, 
+        update.effective_user.first_name, 
+        update.effective_user.last_name
+    )
+    
     if stats.get(f'start_{user_id}', 0) == 0:
         await update.message.reply_text('👋 欢迎使用 FinalShell 激活码机器人，已更新可支持4.6.5版本！\n请输入机器码获取激活码。')
         stats[f'start_{user_id}'] = 1
@@ -81,6 +127,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('你已使用过本机器人，直接输入机器码即可获取激活码。')
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    
+    # 基础帮助信息
     help_text = (
         '📚 帮助信息:\n'
         '➡️ /start - 欢迎使用\n'
@@ -88,6 +137,21 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '➡️ 直接向我发送机器码\n'
         '➡️ 我会计算并返回激活码\n'
     )
+    
+    # 如果是管理员，显示管理员命令
+    if is_admin(user_id):
+        admin_help = (
+            '\n🔧 管理员命令:\n'
+            '➡️ /stats - 查看统计数据\n'
+            '➡️ /users - 查看用户列表\n'
+            '➡️ /ban <用户ID> - 拉黑用户\n'
+            '➡️ /unban <用户ID> - 解除拉黑\n'
+            '➡️ /say <内容> - 广播消息\n'
+            '➡️ /clear - 清除统计数据\n'
+            '➡️ /cleanup - 清除日志文件\n'
+        )
+        help_text += admin_help
+    
     await update.message.reply_text(help_text)
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -176,6 +240,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if user_id in ban_list:
         await update.message.reply_text('你已被拉黑，无法使用本服务。')
+        update_user_stats(user_id, is_banned=True)
         return
     # 管理员不计数
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -187,9 +252,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         v['last_time'] = now_str
         stats[user_id] = v
         save_json(STATS_FILE(), stats)
+        update_user_stats(user_id, is_banned=False)
         if v['count'] > 3:
             ban_list.add(user_id)
             save_json(BAN_FILE(), list(ban_list))
+            update_user_stats(user_id, is_banned=True)
             await update.message.reply_text('你已超过免费使用次数，如需继续使用请联系管理员。')
             return
     else:
@@ -201,6 +268,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         v['last_time'] = now_str
         stats[user_id] = v
         save_json(STATS_FILE(), stats)
+        update_user_stats(user_id, is_banned=False)
     machine_id = update.message.text.strip()
     # 捕获输出
     import io, sys
@@ -242,6 +310,50 @@ async def say_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             failed += 1
     await update.message.reply_text(f'广播完成，成功：{sent}，失败：{failed}')
 
+async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """查看用户列表"""
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
+        return
+    
+    if not users:
+        await update.message.reply_text('暂无用户记录。')
+        return
+    
+    # 构建用户列表消息
+    msg_lines = ['📋 用户列表:']
+    for uid, user_info in users.items():
+        username = user_info.get('username', '无用户名')
+        first_name = user_info.get('first_name', '')
+        last_name = user_info.get('last_name', '')
+        first_seen = user_info.get('first_seen', '未知')
+        total_requests = user_info.get('total_requests', 0)
+        is_banned = user_info.get('is_banned', False)
+        
+        name = f"{first_name} {last_name}".strip() if first_name or last_name else username
+        status = "🚫 已拉黑" if is_banned else "✅ 正常"
+        
+        msg_lines.append(f"ID: {uid}")
+        msg_lines.append(f"  姓名: {name}")
+        msg_lines.append(f"  首次使用: {first_seen}")
+        msg_lines.append(f"  总请求数: {total_requests}")
+        msg_lines.append(f"  状态: {status}")
+        msg_lines.append("")
+    
+    msg = '\n'.join(msg_lines)
+    
+    # 如果消息太长，分段发送
+    if len(msg) > 4000:
+        chunks = [msg[i:i+4000] for i in range(0, len(msg), 4000)]
+        for i, chunk in enumerate(chunks):
+            await update.message.reply_text(f"用户列表 (第{i+1}部分):\n{chunk}")
+    else:
+        await update.message.reply_text(msg)
+
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler('start', start))
@@ -252,6 +364,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('clear', clear_cmd))
     app.add_handler(CommandHandler('cleanup', cleanup_cmd))
     app.add_handler(CommandHandler('say', say_cmd))
+    app.add_handler(CommandHandler('users', users_cmd))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     print('Bot 运行ing...')
     app.run_polling() 
