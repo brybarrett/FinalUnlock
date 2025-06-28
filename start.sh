@@ -663,16 +663,23 @@ check_bot_status() {
         local pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ -n "$pid" ]; then
             # 使用多种方法检查进程是否存在
-            if ps -p $pid > /dev/null 2>&1 || kill -0 $pid 2>/dev/null; then
+            if ps -p $pid > /dev/null 2>&1; then
                 echo "running"
+                return 0
+            elif kill -0 $pid 2>/dev/null; then
+                echo "running"
+                return 0
             else
                 echo "stopped"
+                return 0
             fi
         else
             echo "stopped"
+            return 0
         fi
     else
         echo "stopped"
+        return 0
     fi
 }
 
@@ -966,12 +973,14 @@ view_logs() {
 check_process() {
     print_message $BLUE "🔍 检查进程状态..."
     
+    # 直接测试状态检测函数
+    print_message $CYAN "=== 状态检测调试信息 ==="
     local status=$(check_bot_status)
-    print_message $CYAN "状态检测结果: $status"
+    print_message $CYAN "check_bot_status() 返回值: '$status'"
     
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
-        print_message $CYAN "PID文件内容: $pid"
+        print_message $CYAN "PID文件内容: '$pid'"
         
         if [ -n "$pid" ]; then
             print_message $CYAN "检查进程 $pid 是否存在..."
@@ -1004,6 +1013,15 @@ check_process() {
     echo
     print_message $CYAN "所有Python进程:"
     ps aux | grep python | grep -v grep || print_message $YELLOW "未找到Python进程"
+    
+    # 根据状态检测结果显示最终结论
+    echo
+    print_message $CYAN "=== 最终状态结论 ==="
+    if [ "$status" = "running" ]; then
+        print_message $GREEN "✅ 机器人状态: 正在运行"
+    else
+        print_message $YELLOW "⚠️ 机器人状态: 未运行"
+    fi
     
     echo
     read -p "按任意键返回..." -n 1 -r
