@@ -1398,7 +1398,6 @@ manage_logs() {
     echo -e "  ${CYAN}• 行数: $log_lines${NC}"
     echo -e "  ${CYAN}• 最后修改: $last_modified${NC}"
     echo
-    
     print_message $CYAN "日志管理选项:"
     echo -e "${CYAN}[1] 查看实时日志${NC}"
     echo -e "${CYAN}[2] 查看最后50行${NC}"
@@ -1411,81 +1410,83 @@ manage_logs() {
     echo -e "${CYAN}[9] 压缩日志文件${NC}"
     echo -e "${CYAN}[0] 返回${NC}"
     echo
-    
     read -p "请选择 [0-9]: " log_choice
-    
     case $log_choice in
         1)
-            print_message $BLUE "📋 查看实时日志..."
-            print_message $YELLOW "💡 提示: 按 Ctrl+C 退出实时日志查看"
+            print_message $BLUE "📋 实时日志（任意键返回主菜单）..."
+            tail -f "$LOG_FILE" &
+            TAIL_PID=$!
+            read -n 1 -s
+            kill $TAIL_PID 2>/dev/null
+            wait $TAIL_PID 2>/dev/null
             echo
-            tail -f "$LOG_FILE"
-            echo
-            print_message $CYAN "实时日志查看已结束"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         2)
-            print_message $BLUE "📋 最后50行日志:"
+            print_message $BLUE "📋 最后50行日志（任意键返回主菜单）..."
+            tail -n 50 "$LOG_FILE" &
+            TAIL_PID=$!
+            read -n 1 -s
+            kill $TAIL_PID 2>/dev/null
+            wait $TAIL_PID 2>/dev/null
             echo
-            tail -n 50 "$LOG_FILE"
-            echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         3)
-            print_message $BLUE "📋 最后100行日志:"
+            print_message $BLUE "📋 最后100行日志（任意键返回主菜单）..."
+            tail -n 100 "$LOG_FILE" &
+            TAIL_PID=$!
+            read -n 1 -s
+            kill $TAIL_PID 2>/dev/null
+            wait $TAIL_PID 2>/dev/null
             echo
-            tail -n 100 "$LOG_FILE"
-            echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         4)
-            print_message $BLUE "📋 全部日志:"
+            print_message $BLUE "📋 全部日志（任意键返回主菜单）..."
+            cat "$LOG_FILE" &
+            CAT_PID=$!
+            read -n 1 -s
+            kill $CAT_PID 2>/dev/null
+            wait $CAT_PID 2>/dev/null
             echo
-            cat "$LOG_FILE"
-            echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         5)
-            print_message $BLUE "📋 搜索错误日志:"
+            print_message $BLUE "📋 搜索错误日志（任意键返回主菜单）..."
+            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20 &
+            GREP_PID=$!
+            read -n 1 -s
+            kill $GREP_PID 2>/dev/null
+            wait $GREP_PID 2>/dev/null
             echo
-            echo -e "${RED}错误信息:${NC}"
-            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20
-            echo
-            print_message $CYAN "错误日志搜索完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         6)
-            print_message $BLUE "📋 搜索警告日志:"
+            print_message $BLUE "📋 搜索警告日志（任意键返回主菜单）..."
+            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20 &
+            GREP_PID=$!
+            read -n 1 -s
+            kill $GREP_PID 2>/dev/null
+            wait $GREP_PID 2>/dev/null
             echo
-            echo -e "${YELLOW}警告信息:${NC}"
-            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20
-            echo
-            print_message $CYAN "警告日志搜索完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         7)
-            print_message $BLUE "📋 搜索特定关键词:"
+            print_message $BLUE "📋 搜索特定关键词（任意键返回主菜单）..."
             read -p "请输入搜索关键词: " keyword
             if [ -n "$keyword" ]; then
-                print_message $BLUE "📋 搜索结果:"
+                grep -i "$keyword" "$LOG_FILE" | tail -n 20 &
+                GREP_PID=$!
+                read -n 1 -s
+                kill $GREP_PID 2>/dev/null
+                wait $GREP_PID 2>/dev/null
                 echo
-                grep -i "$keyword" "$LOG_FILE" | tail -n 20
-                echo
-                print_message $CYAN "关键词搜索完成"
+                print_message $CYAN "已返回主菜单"
             else
                 print_message $RED "❌ 关键词不能为空"
+                sleep 1
             fi
-            read -p "按任意键返回..." -n 1 -r
-            echo
             ;;
         8)
             print_message $RED "⚠️ 确认清空日志文件?"
@@ -1497,8 +1498,7 @@ manage_logs() {
             else
                 print_message $YELLOW "❌ 取消清空操作"
             fi
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            sleep 1
             ;;
         9)
             print_message $BLUE "📋 压缩日志文件..."
@@ -1506,16 +1506,14 @@ manage_logs() {
             cp "$LOG_FILE" "$backup_log"
             gzip "$backup_log"
             print_message $GREEN "✅ 日志已备份并压缩: $backup_log.gz"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            sleep 1
             ;;
         0)
             return
             ;;
         *)
             print_message $RED "❌ 无效选择"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            sleep 1
             ;;
     esac
 }
@@ -1683,6 +1681,23 @@ main() {
         print_message $GREEN "✅ 环境配置已存在"
     fi
     
+    # ====== 新增：自动检测并后台启动bot ======
+    local need_start=0
+    if [ -f "$ENV_FILE" ]; then
+        if [ ! -f "$PID_FILE" ]; then
+            need_start=1
+        else
+            local pid=$(cat "$PID_FILE" 2>/dev/null)
+            if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
+                need_start=1
+            fi
+        fi
+        if [ $need_start -eq 1 ]; then
+            print_message $YELLOW "检测到机器人未在后台运行，正在自动启动..."
+            start_bot
+        fi
+    fi
+    # ====== 新增结束 ======
     print_message $GREEN "✅ 初始化完成！"
     print_message $CYAN "💡 提示：现在可以在任意目录使用 'fn-bot' 命令启动此脚本"
     print_message $YELLOW "⚠️ 注意：Ctrl+C 已被屏蔽，请使用菜单选项退出"
