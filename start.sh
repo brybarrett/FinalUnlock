@@ -308,6 +308,13 @@ install_dependencies_system() {
 force_setup_environment() {
     print_message $BLUE "⚙️ 配置环境变量..."
     
+    # 等待用户确认开始配置
+    print_message $YELLOW "💡 即将开始配置Bot Token和Chat ID"
+    print_message $CYAN "📋 请确保您已经准备好Bot Token和Chat ID"
+    echo
+    read -p "按回车键开始配置..." -r
+    echo
+    
     # 获取Bot Token
     while true; do
         echo
@@ -318,6 +325,7 @@ force_setup_environment() {
         if [ -n "$BOT_TOKEN" ]; then
             # 简单验证Bot Token格式
             if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                print_message $GREEN "✅ Bot Token格式正确"
                 break
             else
                 print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
@@ -327,6 +335,18 @@ force_setup_environment() {
             print_message $RED "❌ Bot Token不能为空"
         fi
     done
+    
+    # 确认Bot Token
+    echo
+    print_message $BLUE "📋 您输入的Bot Token: $BOT_TOKEN"
+    read -p "确认Bot Token正确吗? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_message $YELLOW "⚠️ 请重新输入Bot Token"
+        return 1
+    fi
+    print_message $GREEN "✅ Bot Token已确认"
+    echo
     
     # 获取Chat ID
     while true; do
@@ -338,6 +358,7 @@ force_setup_environment() {
         if [ -n "$CHAT_ID" ]; then
             # 简单验证Chat ID格式
             if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                print_message $GREEN "✅ Chat ID格式正确"
                 break
             else
                 print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
@@ -347,6 +368,30 @@ force_setup_environment() {
             print_message $RED "❌ Chat ID不能为空"
         fi
     done
+    
+    # 确认Chat ID
+    echo
+    print_message $BLUE "📋 您输入的Chat ID: $CHAT_ID"
+    read -p "确认Chat ID正确吗? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_message $YELLOW "⚠️ 请重新输入Chat ID"
+        return 1
+    fi
+    print_message $GREEN "✅ Chat ID已确认"
+    echo
+    
+    # 最终确认
+    print_message $BLUE "📋 配置信息确认:"
+    print_message $CYAN "Bot Token: $BOT_TOKEN"
+    print_message $CYAN "Chat ID: $CHAT_ID"
+    echo
+    read -p "确认保存配置吗? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_message $YELLOW "⚠️ 配置已取消"
+        return 1
+    fi
     
     # 创建.env文件
     cat > "$ENV_FILE" << EOF
@@ -1205,15 +1250,22 @@ main() {
     if [ ! -f "$ENV_FILE" ]; then
         print_message $BLUE "⚙️ 首次运行，需要配置Bot Token和Chat ID..."
         print_message $YELLOW "💡 请按提示完成配置，配置完成后即可启动机器人"
+        print_message $CYAN "📋 配置完成后即可启动机器人"
         echo
         
         # 强制配置，不提供跳过选项
-        force_setup_environment
-        if [ $? -ne 0 ]; then
-            print_message $RED "❌ 环境配置失败"
-            exit 1
-        fi
-        print_message $GREEN "✅ 配置完成！现在可以启动机器人了"
+        while true; do
+            force_setup_environment
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 配置完成！现在可以启动机器人了"
+                break
+            else
+                print_message $YELLOW "⚠️ 配置未完成，请重新配置"
+                echo
+                read -p "按回车键重新开始配置..." -r
+                echo
+            fi
+        done
         echo
     else
         print_message $GREEN "✅ 环境配置已存在"
