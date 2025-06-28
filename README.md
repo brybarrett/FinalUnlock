@@ -15,6 +15,16 @@ Demo：[@FinalUnlock_bot](https://t.me/FinalUnlock_bot)
 - 统计数据、黑名单、操作日志本地持久化，按天分文件
 - 管理员可向所有用户广播消息
 
+## 推荐一键安装--不需要提前输入Bot Token和Chat ID
+
+## 🚀 一键安装命令
+
+```bash
+bash <(curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/onekey_install.sh)
+```
+
+
+
 ## 依赖安装
 
 请确保已安装 Python 3.7 及以上版本。
