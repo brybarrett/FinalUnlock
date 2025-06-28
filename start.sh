@@ -1059,7 +1059,20 @@ check_updates() {
         git init
         git remote add origin "$GITHUB_REPO"
         git fetch origin
-        git checkout -f origin/main
+        
+        # 尝试检测默认分支
+        local default_branch="main"
+        if git ls-remote --heads origin main | grep -q main; then
+            default_branch="main"
+        elif git ls-remote --heads origin master | grep -q master; then
+            default_branch="master"
+        else
+            # 获取默认分支
+            default_branch=$(git ls-remote --symref origin HEAD | head -n1 | cut -d/ -f3)
+        fi
+        
+        print_message $CYAN "检测到默认分支: $default_branch"
+        git checkout -f origin/$default_branch
         
         if [ $? -eq 0 ]; then
             print_message $GREEN "✅ 仓库同步完成"
@@ -1090,37 +1103,61 @@ check_updates() {
     fi
     
     # 检查网络连接
+    print_message $BLUE "🌐 检查网络连接..."
     if ! ping -c 1 github.com > /dev/null 2>&1; then
         print_message $RED "❌ 无法连接到GitHub，请检查网络连接"
         return 1
     fi
+    print_message $GREEN "✅ 网络连接正常"
     
     # 获取远程更新
-    print_message $YELLOW "🔄 正在检查远程更新..."
+    print_message $BLUE "📡 正在连接GitHub获取更新信息..."
     git fetch origin
     
     if [ $? -ne 0 ]; then
         print_message $RED "❌ 无法获取远程更新"
         return 1
     fi
+    print_message $GREEN "✅ 成功连接到GitHub"
+    
+    # 检测当前分支和远程分支
+    local current_branch=$(git branch --show-current)
+    local remote_branch=""
+    
+    # 尝试检测远程分支
+    if git ls-remote --heads origin main | grep -q main; then
+        remote_branch="main"
+    elif git ls-remote --heads origin master | grep -q master; then
+        remote_branch="master"
+    else
+        remote_branch="main"  # 默认使用main
+    fi
+    
+    print_message $CYAN "当前分支: $current_branch"
+    print_message $CYAN "远程分支: $remote_branch"
     
     # 检查是否有更新
-    local behind=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
-    local ahead=$(git rev-list origin/main..HEAD --count 2>/dev/null || echo "0")
+    print_message $BLUE "🔍 正在检测GitHub文件更新..."
+    local behind=$(git rev-list HEAD..origin/$remote_branch --count 2>/dev/null || echo "0")
+    local ahead=$(git rev-list origin/$remote_branch..HEAD --count 2>/dev/null || echo "0")
+    
+    print_message $CYAN "本地落后远程: $behind 个提交"
+    print_message $CYAN "本地领先远程: $ahead 个提交"
     
     if [ "$behind" -gt 0 ]; then
-        print_message $YELLOW "🔄 发现 $behind 个更新"
+        print_message $YELLOW "🆕 检测到GitHub有更新！"
+        print_message $CYAN "发现 $behind 个新提交"
         print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
-        print_message $CYAN "最新版本: $(git rev-parse --short origin/main)"
+        print_message $CYAN "最新版本: $(git rev-parse --short origin/$remote_branch)"
         
         # 显示更新内容
         echo
-        print_message $CYAN "更新内容预览:"
-        git log --oneline HEAD..origin/main --max-count=5
+        print_message $CYAN "📋 更新内容预览:"
+        git log --oneline HEAD..origin/$remote_branch --max-count=5
         
         echo
         print_message $YELLOW "⚠️ 注意：更新操作需要用户手动确认"
-        read -p "是否更新到最新版本? (y/N): " -n 1 -r
+        read -p "是否下载并安装更新? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             # 再次确认
@@ -1128,7 +1165,7 @@ check_updates() {
             read -p "此操作将覆盖本地文件，确认继续? (y/N): " -n 1 -r
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                print_message $YELLOW "❌ 取消更新操作"
+                print_message $YELLOW "⏭️ 跳过更新"
                 return
             fi
             
@@ -1149,11 +1186,29 @@ check_updates() {
             fi
             
             # 执行更新
-            print_message $BLUE "🔄 正在更新到最新版本..."
-            git reset --hard origin/main
+            print_message $BLUE "📥 正在下载更新文件..."
+            
+            # 获取更新前的文件状态
+            local updated_files=$(git diff --name-only HEAD origin/$remote_branch 2>/dev/null || echo "")
+            
+            git reset --hard origin/$remote_branch
             
             if [ $? -eq 0 ]; then
-                print_message $GREEN "✅ 更新完成"
+                print_message $GREEN "✅ 更新文件下载完成"
+                print_message $GREEN "✅ 更新安装完成"
+                
+                # 显示更新的文件列表
+                if [ -n "$updated_files" ]; then
+                    echo
+                    print_message $CYAN "📋 此次更新内容:"
+                    echo "$updated_files" | while read -r file; do
+                        if [ -n "$file" ]; then
+                            print_message $WHITE "  • $file"
+                        fi
+                    done
+                else
+                    print_message $CYAN "📋 此次更新内容: 所有文件已同步到最新版本"
+                fi
                 
                 # 恢复配置文件
                 if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
@@ -1179,7 +1234,7 @@ check_updates() {
                     fi
                 fi
             else
-                print_message $RED "❌ 更新失败"
+                print_message $RED "❌ 更新下载失败"
                 
                 # 恢复配置文件（即使更新失败）
                 if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
@@ -1192,18 +1247,20 @@ check_updates() {
                 return 1
             fi
         else
-            print_message $YELLOW "❌ 取消更新"
+            print_message $YELLOW "⏭️ 跳过更新"
         fi
     elif [ "$ahead" -gt 0 ]; then
         print_message $YELLOW "⚠️ 本地版本领先远程版本 $ahead 个提交"
         print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
-        print_message $CYAN "远程版本: $(git rev-parse --short origin/main)"
+        print_message $CYAN "远程版本: $(git rev-parse --short origin/$remote_branch)"
+        print_message $BLUE "💡 提示：本地版本比GitHub版本更新"
         echo
         read -p "按任意键返回..." -n 1 -r
         echo
     else
-        print_message $GREEN "✅ 已是最新版本"
+        print_message $GREEN "✅ 未检测到更新"
         print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
+        print_message $BLUE "💡 提示：本地文件已是最新版本"
         echo
         read -p "按任意键返回..." -n 1 -r
         echo
