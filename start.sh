@@ -304,7 +304,61 @@ install_dependencies_system() {
     fi
 }
 
-# 配置环境变量
+# 强制配置环境变量（首次运行）
+force_setup_environment() {
+    print_message $BLUE "⚙️ 配置环境变量..."
+    
+    # 获取Bot Token
+    while true; do
+        echo
+        print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
+        read -p "Bot Token: " BOT_TOKEN
+        
+        if [ -n "$BOT_TOKEN" ]; then
+            # 简单验证Bot Token格式
+            if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                break
+            else
+                print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
+                print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+            fi
+        else
+            print_message $RED "❌ Bot Token不能为空"
+        fi
+    done
+    
+    # 获取Chat ID
+    while true; do
+        echo
+        print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
+        read -p "Chat ID: " CHAT_ID
+        
+        if [ -n "$CHAT_ID" ]; then
+            # 简单验证Chat ID格式
+            if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                break
+            else
+                print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
+                print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+            fi
+        else
+            print_message $RED "❌ Chat ID不能为空"
+        fi
+    done
+    
+    # 创建.env文件
+    cat > "$ENV_FILE" << EOF
+BOT_TOKEN=$BOT_TOKEN
+CHAT_ID=$CHAT_ID
+EOF
+    
+    print_message $GREEN "✅ 环境配置已保存到 .env 文件"
+    return 0
+}
+
+# 配置环境变量（菜单选项）
 setup_environment() {
     print_message $BLUE "⚙️ 配置环境变量..."
     
@@ -1152,7 +1206,9 @@ main() {
         print_message $BLUE "⚙️ 首次运行，需要配置Bot Token和Chat ID..."
         print_message $YELLOW "💡 请按提示完成配置，配置完成后即可启动机器人"
         echo
-        setup_environment
+        
+        # 强制配置，不提供跳过选项
+        force_setup_environment
         if [ $? -ne 0 ]; then
             print_message $RED "❌ 环境配置失败"
             exit 1
