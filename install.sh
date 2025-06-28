@@ -197,6 +197,7 @@ print_message $GREEN "✅ 安装完成！"
 echo
 print_message $CYAN "🚀 正在启动机器人管理界面..."
 print_message $YELLOW "💡 首次运行需要配置Bot Token和Chat ID"
+print_message $BLUE "📋 请按提示完成配置后即可启动机器人"
 sleep 2
 
 # 直接启动管理脚本

@@ -1150,11 +1150,15 @@ main() {
     # 检查环境配置
     if [ ! -f "$ENV_FILE" ]; then
         print_message $BLUE "⚙️ 首次运行，需要配置Bot Token和Chat ID..."
+        print_message $YELLOW "💡 请按提示完成配置，配置完成后即可启动机器人"
+        echo
         setup_environment
         if [ $? -ne 0 ]; then
             print_message $RED "❌ 环境配置失败"
             exit 1
         fi
+        print_message $GREEN "✅ 配置完成！现在可以启动机器人了"
+        echo
     else
         print_message $GREEN "✅ 环境配置已存在"
     fi
@@ -1162,7 +1166,15 @@ main() {
     print_message $GREEN "✅ 初始化完成！"
     print_message $CYAN "💡 提示：现在可以在任意目录使用 'fn-bot' 命令启动此脚本"
     print_message $YELLOW "⚠️ 注意：Ctrl+C 已被屏蔽，请使用菜单选项退出"
-    print_message $BLUE "🚀 正在启动管理界面..."
+    
+    # 根据配置状态显示不同信息
+    if [ -f "$ENV_FILE" ]; then
+        print_message $GREEN "🚀 配置已完成，可以启动机器人了！"
+    else
+        print_message $YELLOW "⚙️ 请先配置Bot Token和Chat ID"
+    fi
+    
+    print_message $BLUE "📋 正在启动管理界面..."
     sleep 2
     
     # 主菜单循环
