@@ -436,90 +436,104 @@ force_setup_environment() {
     read -p "按回车键开始配置..." -r
     echo
     
-    # 第一步：获取Bot Token
-    print_message $BLUE "📝 第一步：配置Bot Token"
-    print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
-    print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
-    
-    # 获取Bot Token
+    # 配置Bot Token
     while true; do
-        read -p "Bot Token: " BOT_TOKEN
+        print_message $BLUE "📝 第一步：配置Bot Token"
+        print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
         
-        if [ -n "$BOT_TOKEN" ]; then
-            # 简单验证Bot Token格式
-            if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
-                print_message $GREEN "✅ Bot Token格式正确"
-                break
+        # 获取Bot Token
+        while true; do
+            read -p "Bot Token: " BOT_TOKEN
+            
+            if [ -n "$BOT_TOKEN" ]; then
+                # 简单验证Bot Token格式
+                if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                    print_message $GREEN "✅ Bot Token格式正确"
+                    break
+                else
+                    print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                fi
             else
-                print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
-                print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                print_message $RED "❌ Bot Token不能为空"
             fi
+        done
+        
+        # 确认Bot Token
+        echo
+        print_message $BLUE "📋 您输入的Bot Token: $BOT_TOKEN"
+        read -p "确认Bot Token正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Bot Token已确认"
+            break
         else
-            print_message $RED "❌ Bot Token不能为空"
+            print_message $YELLOW "⚠️ 请重新输入Bot Token"
+            echo
         fi
     done
     
-    # 确认Bot Token
-    echo
-    print_message $BLUE "📋 您输入的Bot Token: $BOT_TOKEN"
-    read -p "确认Bot Token正确吗? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_message $YELLOW "⚠️ 请重新输入Bot Token"
-        return 1
-    fi
-    print_message $GREEN "✅ Bot Token已确认"
     echo
     
-    # 等待用户准备Chat ID
-    print_message $BLUE "📝 第二步：配置Chat ID"
-    print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
-    print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
-    echo
-    read -p "准备好Chat ID后按回车键继续..." -r
-    echo
-    
-    # 获取Chat ID
+    # 配置Chat ID
     while true; do
-        read -p "Chat ID: " CHAT_ID
+        print_message $BLUE "📝 第二步：配置Chat ID"
+        print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
+        echo
+        read -p "准备好Chat ID后按回车键继续..." -r
+        echo
         
-        if [ -n "$CHAT_ID" ]; then
-            # 简单验证Chat ID格式
-            if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-                print_message $GREEN "✅ Chat ID格式正确"
-                break
+        # 获取Chat ID
+        while true; do
+            read -p "Chat ID: " CHAT_ID
+            
+            if [ -n "$CHAT_ID" ]; then
+                # 简单验证Chat ID格式
+                if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                    print_message $GREEN "✅ Chat ID格式正确"
+                    break
+                else
+                    print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                fi
             else
-                print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
-                print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                print_message $RED "❌ Chat ID不能为空"
             fi
+        done
+        
+        # 确认Chat ID
+        echo
+        print_message $BLUE "📋 您输入的Chat ID: $CHAT_ID"
+        read -p "确认Chat ID正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Chat ID已确认"
+            break
         else
-            print_message $RED "❌ Chat ID不能为空"
+            print_message $YELLOW "⚠️ 请重新输入Chat ID"
+            echo
         fi
     done
     
-    # 确认Chat ID
-    echo
-    print_message $BLUE "📋 您输入的Chat ID: $CHAT_ID"
-    read -p "确认Chat ID正确吗? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_message $YELLOW "⚠️ 请重新输入Chat ID"
-        return 1
-    fi
-    print_message $GREEN "✅ Chat ID已确认"
     echo
     
     # 最终确认
-    print_message $BLUE "📋 配置信息确认:"
-    print_message $CYAN "Bot Token: $BOT_TOKEN"
-    print_message $CYAN "Chat ID: $CHAT_ID"
-    echo
-    read -p "确认保存配置吗? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_message $YELLOW "⚠️ 配置已取消"
-        return 1
-    fi
+    while true; do
+        print_message $BLUE "📋 配置信息确认:"
+        print_message $CYAN "Bot Token: $BOT_TOKEN"
+        print_message $CYAN "Chat ID: $CHAT_ID"
+        echo
+        read -p "确认保存配置吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            break
+        else
+            print_message $YELLOW "⚠️ 配置已取消，请重新开始"
+            return 1
+        fi
+    done
     
     # 创建.env文件
     cat > "$ENV_FILE" << EOF
@@ -546,45 +560,92 @@ setup_environment() {
         fi
     fi
     
-    # 获取Bot Token
+    # 配置Bot Token
     while true; do
         echo
         print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
         print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
-        read -p "Bot Token: " BOT_TOKEN
         
-        if [ -n "$BOT_TOKEN" ]; then
-            # 简单验证Bot Token格式
-            if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
-                break
+        # 获取Bot Token
+        while true; do
+            read -p "Bot Token: " BOT_TOKEN
+            
+            if [ -n "$BOT_TOKEN" ]; then
+                # 简单验证Bot Token格式
+                if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                    print_message $GREEN "✅ Bot Token格式正确"
+                    break
+                else
+                    print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                fi
             else
-                print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
-                print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                print_message $RED "❌ Bot Token不能为空"
             fi
+        done
+        
+        # 确认Bot Token
+        echo
+        print_message $BLUE "📋 您输入的Bot Token: $BOT_TOKEN"
+        read -p "确认Bot Token正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Bot Token已确认"
+            break
         else
-            print_message $RED "❌ Bot Token不能为空"
+            print_message $YELLOW "⚠️ 请重新输入Bot Token"
         fi
     done
     
-    # 获取Chat ID
+    # 配置Chat ID
     while true; do
         echo
         print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
         print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
-        read -p "Chat ID: " CHAT_ID
         
-        if [ -n "$CHAT_ID" ]; then
-            # 简单验证Chat ID格式
-            if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-                break
+        # 获取Chat ID
+        while true; do
+            read -p "Chat ID: " CHAT_ID
+            
+            if [ -n "$CHAT_ID" ]; then
+                # 简单验证Chat ID格式
+                if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                    print_message $GREEN "✅ Chat ID格式正确"
+                    break
+                else
+                    print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                fi
             else
-                print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
-                print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                print_message $RED "❌ Chat ID不能为空"
             fi
+        done
+        
+        # 确认Chat ID
+        echo
+        print_message $BLUE "📋 您输入的Chat ID: $CHAT_ID"
+        read -p "确认Chat ID正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Chat ID已确认"
+            break
         else
-            print_message $RED "❌ Chat ID不能为空"
+            print_message $YELLOW "⚠️ 请重新输入Chat ID"
         fi
     done
+    
+    # 最终确认
+    echo
+    print_message $BLUE "📋 配置信息确认:"
+    print_message $CYAN "Bot Token: $BOT_TOKEN"
+    print_message $CYAN "Chat ID: $CHAT_ID"
+    echo
+    read -p "确认保存配置吗? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_message $YELLOW "⚠️ 配置已取消"
+        return 1
+    fi
     
     # 创建.env文件
     cat > "$ENV_FILE" << EOF
@@ -715,6 +776,10 @@ start_bot() {
         print_message $CYAN "  3. 检查依赖是否完整安装"
         print_message $CYAN "  4. 查看完整日志: cat $LOG_FILE"
     fi
+    
+    echo
+    read -p "按任意键返回..." -n 1 -r
+    echo
 }
 
 # 停止机器人
@@ -746,6 +811,10 @@ stop_bot() {
         print_message $GREEN "✅ 机器人已停止"
         rm -f "$PID_FILE"
     fi
+    
+    echo
+    read -p "按任意键返回..." -n 1 -r
+    echo
 }
 
 # 查看实时日志
@@ -771,30 +840,58 @@ view_logs() {
     
     case $log_choice in
         1)
-            print_message $BLUE "📋 查看实时日志 (按 Ctrl+C 退出)..."
+            print_message $BLUE "📋 查看实时日志..."
+            print_message $YELLOW "💡 提示: 按 Ctrl+C 退出实时日志查看"
+            echo
             tail -f "$LOG_FILE"
+            echo
+            print_message $CYAN "实时日志查看已结束"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         2)
             print_message $BLUE "📋 最后50行日志:"
+            echo
             tail -n 50 "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         3)
             print_message $BLUE "📋 最后100行日志:"
+            echo
             tail -n 100 "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         4)
             print_message $BLUE "📋 全部日志:"
+            echo
             cat "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         5)
             print_message $BLUE "📋 搜索错误日志:"
+            echo
             grep -i "error\|exception\|traceback\|failed" "$LOG_FILE" | tail -n 20
+            echo
+            print_message $CYAN "错误日志搜索完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         0)
             return
             ;;
         *)
             print_message $RED "❌ 无效选择"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
     esac
 }
@@ -815,6 +912,10 @@ check_process() {
     else
         print_message $YELLOW "⚠️ 机器人未在运行"
     fi
+    
+    echo
+    read -p "按任意键返回..." -n 1 -r
+    echo
 }
 
 # 检查更新
@@ -934,9 +1035,15 @@ check_updates() {
         print_message $YELLOW "⚠️ 本地版本领先远程版本 $ahead 个提交"
         print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
         print_message $CYAN "远程版本: $(git rev-parse --short origin/main)"
+        echo
+        read -p "按任意键返回..." -n 1 -r
+        echo
     else
         print_message $GREEN "✅ 已是最新版本"
         print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
+        echo
+        read -p "按任意键返回..." -n 1 -r
+        echo
     fi
 }
 
@@ -1004,6 +1111,10 @@ check_dependencies() {
     echo -e "  ${CYAN}• Python版本: $($PYTHON_CMD --version)${NC}"
     echo -e "  ${CYAN}• Python路径: $(which $PYTHON_CMD)${NC}"
     echo -e "  ${CYAN}• pip版本: $($PIP_CMD --version)${NC}"
+    
+    echo
+    read -p "按任意键返回..." -n 1 -r
+    echo
 }
 
 # 重新安装依赖
@@ -1023,6 +1134,10 @@ reinstall_dependencies() {
     
     # 重新安装
     install_dependencies
+    
+    echo
+    read -p "按任意键返回..." -n 1 -r
+    echo
 }
 
 # 检查虚拟环境
@@ -1083,6 +1198,8 @@ check_venv() {
             else
                 print_message $RED "❌ 虚拟环境创建失败"
             fi
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         2)
             if [ -d "venv" ]; then
@@ -1096,6 +1213,8 @@ check_venv() {
             else
                 print_message $YELLOW "⚠️ 虚拟环境不存在"
             fi
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         3)
             print_message $BLUE "🔄 重新创建虚拟环境..."
@@ -1107,12 +1226,16 @@ check_venv() {
             else
                 print_message $RED "❌ 虚拟环境创建失败"
             fi
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         0)
             return
             ;;
         *)
             print_message $RED "❌ 无效选择"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
     esac
 }
@@ -1209,40 +1332,76 @@ manage_logs() {
     
     case $log_choice in
         1)
-            print_message $BLUE "📋 查看实时日志 (按 Ctrl+C 退出)..."
+            print_message $BLUE "📋 查看实时日志..."
+            print_message $YELLOW "💡 提示: 按 Ctrl+C 退出实时日志查看"
+            echo
             tail -f "$LOG_FILE"
+            echo
+            print_message $CYAN "实时日志查看已结束"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         2)
             print_message $BLUE "📋 最后50行日志:"
+            echo
             tail -n 50 "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         3)
             print_message $BLUE "📋 最后100行日志:"
+            echo
             tail -n 100 "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         4)
             print_message $BLUE "📋 全部日志:"
+            echo
             cat "$LOG_FILE"
+            echo
+            print_message $CYAN "日志查看完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         5)
             print_message $BLUE "📋 搜索错误日志:"
+            echo
             echo -e "${RED}错误信息:${NC}"
             grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20
+            echo
+            print_message $CYAN "错误日志搜索完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         6)
             print_message $BLUE "📋 搜索警告日志:"
+            echo
             echo -e "${YELLOW}警告信息:${NC}"
             grep -i "warning\|warn" "$LOG_FILE" | tail -n 20
+            echo
+            print_message $CYAN "警告日志搜索完成"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         7)
             print_message $BLUE "📋 搜索特定关键词:"
             read -p "请输入搜索关键词: " keyword
             if [ -n "$keyword" ]; then
                 print_message $BLUE "📋 搜索结果:"
+                echo
                 grep -i "$keyword" "$LOG_FILE" | tail -n 20
+                echo
+                print_message $CYAN "关键词搜索完成"
             else
                 print_message $RED "❌ 关键词不能为空"
             fi
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         8)
             print_message $RED "⚠️ 确认清空日志文件?"
@@ -1254,6 +1413,8 @@ manage_logs() {
             else
                 print_message $YELLOW "❌ 取消清空操作"
             fi
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         9)
             print_message $BLUE "📋 压缩日志文件..."
@@ -1261,12 +1422,16 @@ manage_logs() {
             cp "$LOG_FILE" "$backup_log"
             gzip "$backup_log"
             print_message $GREEN "✅ 日志已备份并压缩: $backup_log.gz"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
         0)
             return
             ;;
         *)
             print_message $RED "❌ 无效选择"
+            read -p "按任意键返回..." -n 1 -r
+            echo
             ;;
     esac
 }

@@ -193,11 +193,151 @@ EOF
     print_message $GREEN "✅ 桌面快捷方式创建成功"
 fi
 
+# 配置Bot Token和Chat ID
+configure_bot() {
+    print_message $BLUE "⚙️ 配置Bot Token和Chat ID..."
+    
+    # 等待用户确认开始配置
+    print_message $YELLOW "💡 即将开始配置Bot Token和Chat ID"
+    print_message $CYAN "📋 请确保您已经准备好Bot Token和Chat ID"
+    echo
+    read -p "按回车键开始配置..." -r
+    echo
+    
+    # 配置Bot Token
+    while true; do
+        print_message $BLUE "📝 第一步：配置Bot Token"
+        print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
+        
+        # 获取Bot Token
+        while true; do
+            read -p "Bot Token: " BOT_TOKEN
+            
+            if [ -n "$BOT_TOKEN" ]; then
+                # 简单验证Bot Token格式
+                if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                    print_message $GREEN "✅ Bot Token格式正确"
+                    break
+                else
+                    print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                fi
+            else
+                print_message $RED "❌ Bot Token不能为空"
+            fi
+        done
+        
+        # 确认Bot Token
+        echo
+        print_message $BLUE "📋 您输入的Bot Token: $BOT_TOKEN"
+        read -p "确认Bot Token正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Bot Token已确认"
+            break
+        else
+            print_message $YELLOW "⚠️ 请重新输入Bot Token"
+            echo
+        fi
+    done
+    
+    echo
+    
+    # 配置Chat ID
+    while true; do
+        print_message $BLUE "📝 第二步：配置Chat ID"
+        print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
+        echo
+        read -p "准备好Chat ID后按回车键继续..." -r
+        echo
+        
+        # 获取Chat ID
+        while true; do
+            read -p "Chat ID: " CHAT_ID
+            
+            if [ -n "$CHAT_ID" ]; then
+                # 简单验证Chat ID格式
+                if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                    print_message $GREEN "✅ Chat ID格式正确"
+                    break
+                else
+                    print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
+                    print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                fi
+            else
+                print_message $RED "❌ Chat ID不能为空"
+            fi
+        done
+        
+        # 确认Chat ID
+        echo
+        print_message $BLUE "📋 您输入的Chat ID: $CHAT_ID"
+        read -p "确认Chat ID正确吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ Chat ID已确认"
+            break
+        else
+            print_message $YELLOW "⚠️ 请重新输入Chat ID"
+            echo
+        fi
+    done
+    
+    echo
+    
+    # 最终确认
+    while true; do
+        print_message $BLUE "📋 配置信息确认:"
+        print_message $CYAN "Bot Token: $BOT_TOKEN"
+        print_message $CYAN "Chat ID: $CHAT_ID"
+        echo
+        read -p "确认保存配置吗? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            break
+        else
+            print_message $YELLOW "⚠️ 配置已取消，请重新开始"
+            return 1
+        fi
+    done
+    
+    # 创建.env文件
+    ENV_FILE="$INSTALL_DIR/.env"
+    cat > "$ENV_FILE" << EOF
+BOT_TOKEN=$BOT_TOKEN
+CHAT_ID=$CHAT_ID
+EOF
+    
+    print_message $GREEN "✅ 环境配置已保存到 .env 文件"
+    return 0
+}
+
 print_message $GREEN "✅ 安装完成！"
 echo
+print_message $CYAN "🚀 正在配置Bot Token和Chat ID..."
+print_message $YELLOW "💡 这是启动机器人必需的配置"
+print_message $BLUE "📋 请按提示完成配置"
+
+# 配置Bot Token和Chat ID
+while true; do
+    configure_bot
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 配置完成！"
+        break
+    else
+        print_message $YELLOW "⚠️ 配置未完成，请重新配置"
+        echo
+        read -p "按回车键重新开始配置..." -r
+        echo
+    fi
+done
+
+echo
 print_message $CYAN "🚀 正在启动机器人管理界面..."
-print_message $YELLOW "💡 首次运行需要配置Bot Token和Chat ID"
-print_message $BLUE "�� 请按提示完成配置后即可启动机器人"
+print_message $GREEN "✅ 所有配置已完成，机器人已准备就绪！"
+print_message $BLUE "📋 您可以在管理界面中启动机器人"
 print_message $CYAN "⏳ 脚本将等待您完成配置..."
 sleep 2
 

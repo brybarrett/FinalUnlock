@@ -79,5 +79,6 @@ print_message $GREEN "🚀 开始安装..."
 rm -rf "$TEMP_DIR"
 
 print_message $GREEN "✅ 一键安装完成！"
-print_message $CYAN "💡 管理界面已启动，请按提示配置Bot Token和Chat ID"
-print_message $YELLOW "📋 配置完成后即可启动机器人" 
+print_message $CYAN "💡 安装过程中已配置Bot Token和Chat ID"
+print_message $YELLOW "📋 机器人已准备就绪，可以在管理界面中启动"
+print_message $BLUE "⏳ 管理界面已启动，您可以开始使用机器人..." 
