@@ -17,13 +17,14 @@ Demo：[@FinalUnlock_bot](https://t.me/FinalUnlock_bot)
 
 ## 推荐一键安装--不需要提前输入Bot Token和Chat ID
 
-## 🚀 一键安装命令
+## 🚀 一键安装命令--全自动
 
 ```bash
 bash <(curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/onekey_install.sh)
 ```
 
 
+## 手动安装
 
 ## 依赖安装
 
