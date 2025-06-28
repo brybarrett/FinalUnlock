@@ -660,10 +660,9 @@ EOF
 # 检查机器人状态
 check_bot_status() {
     if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE")
-        if ps -p $pid > /dev/null 2>&1; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
             echo "running"
-            echo $pid
         else
             echo "stopped"
         fi
@@ -687,16 +686,14 @@ start_bot() {
     local status=$(check_bot_status)
     if [ "$status" = "running" ]; then
         local pid=$(cat "$PID_FILE")
-        print_message $YELLOW "⚠️ 机器人已在运行 (PID: $pid)"
-        read -p "是否重启机器人? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_message $YELLOW "🔄 正在停止现有机器人..."
-            stop_bot
-            sleep 2
-        else
-            return 0
-        fi
+        print_message $YELLOW "🔄 检测到机器人正在运行 (PID: $pid)，正在重启..."
+        
+        # 强制停止现有机器人
+        print_message $BLUE "🛑 正在停止现有机器人..."
+        stop_bot
+        sleep 2
+    else
+        print_message $GREEN "✅ 机器人未在运行，正在启动..."
     fi
     
     # 强制停止所有可能的bot进程
@@ -1623,9 +1620,13 @@ show_menu() {
     local pid_info=""
     
     if [ "$status" = "running" ]; then
-        local pid=$(cat "$PID_FILE")
-        status_text="✅ 正在运行"
-        pid_info=" (PID: $pid)"
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            status_text="✅ 正在运行"
+            pid_info=" (PID: $pid)"
+        else
+            status_text="❌ 未运行"
+        fi
     fi
     
     clear
