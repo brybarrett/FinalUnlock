@@ -676,26 +676,33 @@ check_bot_status() {
 start_bot() {
     print_message $BLUE "🚀 启动机器人..."
     
-    # 检查环境配置
+    # 检查配置是否完成
     if [ ! -f "$ENV_FILE" ]; then
-        print_message $RED "❌ 环境配置文件不存在"
-        print_message $YELLOW "请先配置Bot Token和Chat ID"
-        setup_environment
-    fi
-    
-    # 检查机器人文件
-    if [ ! -f "$PROJECT_DIR/bot.py" ]; then
-        print_message $RED "❌ 机器人文件不存在"
-        print_message $YELLOW "请先下载项目文件"
+        print_message $RED "❌ 请先配置Bot Token和Chat ID"
+        print_message $YELLOW "请选择选项 [c] 进行配置"
         return 1
     fi
     
+    # 检查机器人是否已经在运行
     local status=$(check_bot_status)
     if [ "$status" = "running" ]; then
-        print_message $YELLOW "⚠️ 机器人已在运行，正在重启..."
-        stop_bot
-        sleep 2
+        local pid=$(cat "$PID_FILE")
+        print_message $YELLOW "⚠️ 机器人已在运行 (PID: $pid)"
+        read -p "是否重启机器人? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $YELLOW "🔄 正在停止现有机器人..."
+            stop_bot
+            sleep 2
+        else
+            return 0
+        fi
     fi
+    
+    # 强制停止所有可能的bot进程
+    print_message $BLUE "🔍 检查并清理可能的冲突进程..."
+    pkill -f "bot.py" 2>/dev/null
+    sleep 1
     
     # 切换到项目目录
     cd "$PROJECT_DIR"
@@ -795,15 +802,25 @@ stop_bot() {
     local pid=$(cat "$PID_FILE")
     print_message $YELLOW "🔄 正在停止进程 (PID: $pid)..."
     
-    # 使用kill -9强制停止
-    kill -9 $pid 2>/dev/null
+    # 先尝试优雅停止
+    kill $pid 2>/dev/null
     
     # 等待进程结束
     local count=0
-    while ps -p $pid > /dev/null 2>&1 && [ $count -lt 10 ]; do
+    while ps -p $pid > /dev/null 2>&1 && [ $count -lt 5 ]; do
         sleep 1
         ((count++))
     done
+    
+    # 如果还在运行，强制停止
+    if ps -p $pid > /dev/null 2>&1; then
+        print_message $YELLOW "🔄 强制停止进程..."
+        kill -9 $pid 2>/dev/null
+        sleep 1
+    fi
+    
+    # 清理所有可能的bot进程
+    pkill -f "bot.py" 2>/dev/null
     
     if ps -p $pid > /dev/null 2>&1; then
         print_message $RED "❌ 无法停止机器人进程"
@@ -1435,7 +1452,7 @@ manage_logs() {
     
     # 获取日志文件信息
     local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
-    local log_lines=$(wc -l < "$LOG_FILE" 2>/dev/null || echo "0")
+    local log_lines=$(wc -l < "$LOG_FILE" 2>/dev/null | echo "0")
     local last_modified=$(stat -c %y "$LOG_FILE" 2>/dev/null | cut -d' ' -f1,2 || echo "未知")
     
     echo
@@ -1445,6 +1462,7 @@ manage_logs() {
     echo -e "  ${CYAN}• 行数: $log_lines${NC}"
     echo -e "  ${CYAN}• 最后修改: $last_modified${NC}"
     echo
+    
     print_message $CYAN "日志管理选项:"
     echo -e "${CYAN}[1] 查看实时日志${NC}"
     echo -e "${CYAN}[2] 查看最后50行${NC}"
@@ -1457,22 +1475,35 @@ manage_logs() {
     echo -e "${CYAN}[9] 压缩日志文件${NC}"
     echo -e "${CYAN}[0] 返回${NC}"
     echo
+    
     read -p "请选择 [0-9]: " log_choice
+    
     case $log_choice in
         1)
             print_message $BLUE "📋 实时日志（任意键返回主菜单）..."
             print_message $YELLOW "💡 正在显示实时日志，按任意键返回主菜单..."
             echo
-            # 使用更可靠的方法：先显示一些日志，然后等待按键
+            # 先显示一些日志
             tail -n 10 "$LOG_FILE" 2>/dev/null
             echo
             print_message $CYAN "=== 实时日志开始 ==="
             print_message $YELLOW "按任意键返回主菜单..."
-            # 启动tail -f在后台，但限制输出行数避免阻塞
-            timeout 30 tail -f "$LOG_FILE" 2>/dev/null &
+            
+            # 使用timeout确保不会无限等待
+            timeout 60 tail -f "$LOG_FILE" 2>/dev/null &
             TAIL_PID=$!
-            # 等待用户按键
-            read -n 1 -s
+            
+            # 强制等待用户按键，使用更可靠的方法
+            while true; do
+                if read -t 1 -n 1 -s; then
+                    break
+                fi
+                # 检查tail进程是否还在运行
+                if ! kill -0 $TAIL_PID 2>/dev/null; then
+                    break
+                fi
+            done
+            
             # 立即停止tail进程
             kill $TAIL_PID 2>/dev/null
             wait $TAIL_PID 2>/dev/null
@@ -1501,12 +1532,15 @@ manage_logs() {
             print_message $BLUE "📋 全部日志（任意键返回主菜单）..."
             print_message $YELLOW "💡 正在显示全部日志，按任意键返回主菜单..."
             echo
-            # 使用less或more来分页显示，但提供退出选项
+            
+            # 使用分页显示，但强制提供退出选项
             if command -v less &> /dev/null; then
-                less -R "$LOG_FILE"
+                # 使用less但设置环境变量强制退出
+                LESS_IS_MORE=1 less -R "$LOG_FILE"
             elif command -v more &> /dev/null; then
                 more "$LOG_FILE"
             else
+                # 如果没有分页工具，使用cat但强制等待按键
                 cat "$LOG_FILE" 2>/dev/null
                 echo
                 print_message $YELLOW "按任意键返回主菜单..."
