@@ -209,10 +209,9 @@ install_pip() {
         wget -q https://bootstrap.pypa.io/get-pip.py -O get-pip.py
     else
         print_message $RED "❌ 未找到curl或wget，无法下载pip"
-        print_message $YELLOW "请手动安装pip:"
-        print_message $CYAN "  Ubuntu/Debian: sudo apt-get install python3-pip"
-        print_message $CYAN "  CentOS/RHEL: sudo yum install python3-pip"
-        exit 1
+        print_message $YELLOW "尝试使用系统包管理器安装pip..."
+        install_pip_system
+        return
     fi
     
     if [ -f "get-pip.py" ]; then
@@ -225,12 +224,51 @@ install_pip() {
             PIP_CMD="$PYTHON_CMD -m pip"
             print_message $GREEN "✅ pip安装成功"
         else
-            print_message $RED "❌ pip安装失败"
-            print_message $YELLOW "请手动安装pip后重试"
-            exit 1
+            print_message $YELLOW "⚠️ pip安装失败，尝试使用系统包管理器..."
+            install_pip_system
         fi
     else
         print_message $RED "❌ 下载get-pip.py失败"
+        print_message $YELLOW "尝试使用系统包管理器安装pip..."
+        install_pip_system
+    fi
+}
+
+# 使用系统包管理器安装pip
+install_pip_system() {
+    print_message $BLUE "🔧 尝试使用系统包管理器安装pip..."
+    
+    if command -v apt-get &> /dev/null; then
+        print_message $YELLOW "🔄 使用apt-get安装python3-pip..."
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+    elif command -v yum &> /dev/null; then
+        print_message $YELLOW "🔄 使用yum安装python3-pip..."
+        sudo yum install -y python3-pip
+    elif command -v dnf &> /dev/null; then
+        print_message $YELLOW "🔄 使用dnf安装python3-pip..."
+        sudo dnf install -y python3-pip
+    else
+        print_message $RED "❌ 无法识别系统包管理器"
+        print_message $YELLOW "请手动安装pip:"
+        print_message $CYAN "  Ubuntu/Debian: sudo apt-get install python3-pip"
+        print_message $CYAN "  CentOS/RHEL: sudo yum install python3-pip"
+        exit 1
+    fi
+    
+    # 检查安装结果
+    if command -v pip3 &> /dev/null; then
+        PIP_CMD="pip3"
+        print_message $GREEN "✅ pip3安装成功"
+    elif command -v pip &> /dev/null; then
+        PIP_CMD="pip"
+        print_message $GREEN "✅ pip安装成功"
+    elif $PYTHON_CMD -m pip --version &> /dev/null; then
+        PIP_CMD="$PYTHON_CMD -m pip"
+        print_message $GREEN "✅ python -m pip可用"
+    else
+        print_message $RED "❌ pip安装失败"
+        print_message $YELLOW "请手动安装pip后重试"
         exit 1
     fi
 }
@@ -275,7 +313,41 @@ install_dependencies_system() {
     if command -v apt-get &> /dev/null; then
         print_message $YELLOW "🔄 使用apt-get安装依赖..."
         sudo apt-get update
-        sudo apt-get install -y python3-pip python3-telegram-bot python3-dotenv python3-cryptodome
+        
+        # 尝试安装系统包
+        if sudo apt-get install -y python3-telegram-bot python3-dotenv python3-cryptodome 2>/dev/null; then
+            print_message $GREEN "✅ 系统包安装成功"
+            return 0
+        else
+            print_message $YELLOW "⚠️ 系统包安装失败，尝试使用pip安装..."
+        fi
+        
+        # 如果系统包安装失败，尝试使用pip安装
+        if command -v pip3 &> /dev/null; then
+            PIP_CMD="pip3"
+        elif command -v pip &> /dev/null; then
+            PIP_CMD="pip"
+        elif $PYTHON_CMD -m pip --version &> /dev/null; then
+            PIP_CMD="$PYTHON_CMD -m pip"
+        else
+            print_message $RED "❌ 无法找到可用的pip"
+            print_message $YELLOW "请手动安装依赖:"
+            print_message $CYAN "  pip install python-telegram-bot python-dotenv pycryptodome"
+            exit 1
+        fi
+        
+        # 尝试使用--break-system-packages标志
+        print_message $YELLOW "🔄 尝试使用--break-system-packages标志安装..."
+        $PIP_CMD install --break-system-packages -r "$PROJECT_DIR/requirements.txt"
+        
+        if [ $? -eq 0 ]; then
+            print_message $GREEN "✅ 依赖安装完成"
+            return 0
+        else
+            print_message $YELLOW "⚠️ --break-system-packages安装失败，尝试创建虚拟环境..."
+            install_dependencies_venv
+        fi
+        
     elif command -v yum &> /dev/null; then
         print_message $YELLOW "🔄 使用yum安装依赖..."
         sudo yum install -y python3-pip python3-telegram-bot python3-dotenv python3-cryptodome
@@ -304,6 +376,55 @@ install_dependencies_system() {
     fi
 }
 
+# 使用虚拟环境安装依赖
+install_dependencies_venv() {
+    print_message $BLUE "🐍 创建虚拟环境安装依赖..."
+    
+    # 检查是否支持虚拟环境
+    if ! $PYTHON_CMD -c "import venv" 2>/dev/null; then
+        print_message $RED "❌ 系统不支持虚拟环境"
+        print_message $YELLOW "请安装python3-venv: sudo apt-get install python3-venv"
+        exit 1
+    fi
+    
+    # 创建虚拟环境
+    local venv_dir="$PROJECT_DIR/venv"
+    print_message $YELLOW "🔄 创建虚拟环境: $venv_dir"
+    $PYTHON_CMD -m venv "$venv_dir"
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 虚拟环境创建失败"
+        exit 1
+    fi
+    
+    # 激活虚拟环境
+    print_message $YELLOW "🔄 激活虚拟环境..."
+    source "$venv_dir/bin/activate"
+    
+    # 升级pip
+    print_message $YELLOW "🔄 升级虚拟环境中的pip..."
+    pip install --upgrade pip
+    
+    # 安装依赖
+    print_message $YELLOW "📥 在虚拟环境中安装依赖..."
+    pip install -r "$PROJECT_DIR/requirements.txt"
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 虚拟环境依赖安装完成"
+        print_message $CYAN "💡 虚拟环境路径: $venv_dir"
+        print_message $CYAN "💡 激活命令: source $venv_dir/bin/activate"
+        
+        # 更新PYTHON_CMD为虚拟环境中的Python
+        PYTHON_CMD="$venv_dir/bin/python"
+        PIP_CMD="$venv_dir/bin/pip"
+        
+        return 0
+    else
+        print_message $RED "❌ 虚拟环境依赖安装失败"
+        exit 1
+    fi
+}
+
 # 强制配置环境变量（首次运行）
 force_setup_environment() {
     print_message $BLUE "⚙️ 配置环境变量..."
@@ -315,11 +436,13 @@ force_setup_environment() {
     read -p "按回车键开始配置..." -r
     echo
     
+    # 第一步：获取Bot Token
+    print_message $BLUE "📝 第一步：配置Bot Token"
+    print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+    print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
+    
     # 获取Bot Token
     while true; do
-        echo
-        print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
-        print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
         read -p "Bot Token: " BOT_TOKEN
         
         if [ -n "$BOT_TOKEN" ]; then
@@ -348,11 +471,16 @@ force_setup_environment() {
     print_message $GREEN "✅ Bot Token已确认"
     echo
     
+    # 等待用户准备Chat ID
+    print_message $BLUE "📝 第二步：配置Chat ID"
+    print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+    print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
+    echo
+    read -p "准备好Chat ID后按回车键继续..." -r
+    echo
+    
     # 获取Chat ID
     while true; do
-        echo
-        print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
-        print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
         read -p "Chat ID: " CHAT_ID
         
         if [ -n "$CHAT_ID" ]; then
@@ -510,6 +638,15 @@ start_bot() {
     
     # 切换到项目目录
     cd "$PROJECT_DIR"
+    
+    # 检查虚拟环境
+    local venv_dir="$PROJECT_DIR/venv"
+    if [ -d "$venv_dir" ]; then
+        print_message $BLUE "🐍 检测到虚拟环境，正在激活..."
+        source "$venv_dir/bin/activate"
+        PYTHON_CMD="$venv_dir/bin/python"
+        print_message $GREEN "✅ 虚拟环境已激活"
+    fi
     
     # 检查依赖
     print_message $YELLOW "🔄 检查依赖..."
@@ -1267,6 +1404,16 @@ main() {
             fi
         done
         echo
+        
+        # 配置完成后询问是否立即启动机器人
+        print_message $BLUE "🚀 配置已完成！"
+        read -p "是否立即启动机器人? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            start_bot
+            echo
+            read -p "按回车键进入管理界面..." -r
+        fi
     else
         print_message $GREEN "✅ 环境配置已存在"
     fi
