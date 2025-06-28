@@ -195,16 +195,19 @@ fi
 
 print_message $GREEN "✅ 安装完成！"
 echo
-print_message $CYAN "🚀 启动机器人管理脚本:"
-if [ "$INSTALL_MODE" = "global" ]; then
-    print_message $YELLOW "fn-bot"
+print_message $CYAN "🚀 正在启动机器人管理界面..."
+print_message $YELLOW "💡 首次运行需要配置Bot Token和Chat ID"
+sleep 2
+
+# 直接启动管理脚本
+if [ -f "$INSTALL_DIR/start.sh" ]; then
+    cd "$INSTALL_DIR"
+    exec "$INSTALL_DIR/start.sh"
 else
-    print_message $YELLOW "cd $INSTALL_DIR && ./start.sh"
-    print_message $YELLOW "或: $local_bin/fn-bot (如果PATH已配置)"
-fi
-echo
-print_message $CYAN "💡 其他命令:"
-print_message $YELLOW "cd $INSTALL_DIR"
-print_message $YELLOW "./test_functions.sh  # 功能测试"
-echo
-print_message $GREEN "🎉 安装完成！现在可以开始使用FinalShell激活码机器人了！" 
+    print_message $RED "❌ 管理脚本不存在，请手动运行:"
+    if [ "$INSTALL_MODE" = "global" ]; then
+        print_message $YELLOW "fn-bot"
+    else
+        print_message $YELLOW "cd $INSTALL_DIR && ./start.sh"
+    fi
+fi 

@@ -156,11 +156,9 @@ check_python() {
     
     if command -v python3 &> /dev/null; then
         PYTHON_CMD="python3"
-        PIP_CMD="pip3"
         print_message $GREEN "✅ 找到 python3"
     elif command -v python &> /dev/null; then
         PYTHON_CMD="python"
-        PIP_CMD="pip"
         print_message $GREEN "✅ 找到 python"
     else
         print_message $RED "❌ 未找到Python环境，请先安装Python 3.7+"
@@ -178,6 +176,63 @@ check_python() {
     fi
     
     print_message $GREEN "✅ Python版本检查通过: $version"
+    
+    # 检查pip
+    if command -v pip3 &> /dev/null; then
+        PIP_CMD="pip3"
+        print_message $GREEN "✅ 找到 pip3"
+    elif command -v pip &> /dev/null; then
+        PIP_CMD="pip"
+        print_message $GREEN "✅ 找到 pip"
+    else
+        print_message $YELLOW "⚠️ 未找到pip，尝试使用python -m pip..."
+        if $PYTHON_CMD -m pip --version &> /dev/null; then
+            PIP_CMD="$PYTHON_CMD -m pip"
+            print_message $GREEN "✅ 找到 python -m pip"
+        else
+            print_message $YELLOW "⚠️ 未找到pip，尝试安装..."
+            install_pip
+        fi
+    fi
+}
+
+# 安装pip
+install_pip() {
+    print_message $BLUE "📦 正在安装pip..."
+    
+    # 尝试使用get-pip.py安装
+    if command -v curl &> /dev/null; then
+        print_message $YELLOW "🔄 使用curl下载get-pip.py..."
+        curl -s https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+    elif command -v wget &> /dev/null; then
+        print_message $YELLOW "🔄 使用wget下载get-pip.py..."
+        wget -q https://bootstrap.pypa.io/get-pip.py -O get-pip.py
+    else
+        print_message $RED "❌ 未找到curl或wget，无法下载pip"
+        print_message $YELLOW "请手动安装pip:"
+        print_message $CYAN "  Ubuntu/Debian: sudo apt-get install python3-pip"
+        print_message $CYAN "  CentOS/RHEL: sudo yum install python3-pip"
+        exit 1
+    fi
+    
+    if [ -f "get-pip.py" ]; then
+        print_message $YELLOW "🔄 安装pip..."
+        $PYTHON_CMD get-pip.py --user
+        rm -f get-pip.py
+        
+        # 检查安装结果
+        if $PYTHON_CMD -m pip --version &> /dev/null; then
+            PIP_CMD="$PYTHON_CMD -m pip"
+            print_message $GREEN "✅ pip安装成功"
+        else
+            print_message $RED "❌ pip安装失败"
+            print_message $YELLOW "请手动安装pip后重试"
+            exit 1
+        fi
+    else
+        print_message $RED "❌ 下载get-pip.py失败"
+        exit 1
+    fi
 }
 
 # 检查并安装依赖
@@ -190,18 +245,61 @@ install_dependencies() {
         exit 1
     fi
     
+    # 确保pip命令可用
+    if [ -z "$PIP_CMD" ]; then
+        print_message $YELLOW "⚠️ pip命令未设置，重新检测..."
+        check_python
+    fi
+    
     # 升级pip
     print_message $YELLOW "🔄 升级pip..."
-    $PIP_CMD install --upgrade pip
+    $PIP_CMD install --upgrade pip --user
     
     # 安装依赖
     print_message $YELLOW "📥 安装项目依赖..."
-    $PIP_CMD install -r "$PROJECT_DIR/requirements.txt"
+    $PIP_CMD install -r "$PROJECT_DIR/requirements.txt" --user
     
     if [ $? -eq 0 ]; then
         print_message $GREEN "✅ 依赖安装完成"
     else
         print_message $RED "❌ 依赖安装失败"
+        print_message $YELLOW "尝试使用系统包管理器安装..."
+        install_dependencies_system
+    fi
+}
+
+# 使用系统包管理器安装依赖
+install_dependencies_system() {
+    print_message $BLUE "🔧 尝试使用系统包管理器安装依赖..."
+    
+    if command -v apt-get &> /dev/null; then
+        print_message $YELLOW "🔄 使用apt-get安装依赖..."
+        sudo apt-get update
+        sudo apt-get install -y python3-pip python3-telegram-bot python3-dotenv python3-cryptodome
+    elif command -v yum &> /dev/null; then
+        print_message $YELLOW "🔄 使用yum安装依赖..."
+        sudo yum install -y python3-pip python3-telegram-bot python3-dotenv python3-cryptodome
+    elif command -v dnf &> /dev/null; then
+        print_message $YELLOW "🔄 使用dnf安装依赖..."
+        sudo dnf install -y python3-pip python3-telegram-bot python3-dotenv python3-cryptodome
+    else
+        print_message $RED "❌ 无法识别系统包管理器"
+        print_message $YELLOW "请手动安装以下依赖:"
+        print_message $CYAN "  python-telegram-bot"
+        print_message $CYAN "  python-dotenv"
+        print_message $CYAN "  pycryptodome"
+        exit 1
+    fi
+    
+    # 再次尝试pip安装
+    print_message $YELLOW "🔄 再次尝试pip安装..."
+    $PIP_CMD install -r "$PROJECT_DIR/requirements.txt" --user
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 依赖安装完成"
+    else
+        print_message $RED "❌ 依赖安装仍然失败"
+        print_message $YELLOW "请检查网络连接或手动安装依赖"
         exit 1
     fi
 }
@@ -217,7 +315,7 @@ setup_environment() {
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             print_message $GREEN "✅ 使用现有配置"
-            return
+            return 0
         fi
     fi
     
@@ -225,10 +323,17 @@ setup_environment() {
     while true; do
         echo
         print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @BotFather，发送 /newbot 创建机器人"
         read -p "Bot Token: " BOT_TOKEN
         
         if [ -n "$BOT_TOKEN" ]; then
-            break
+            # 简单验证Bot Token格式
+            if [[ "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                break
+            else
+                print_message $RED "❌ Bot Token格式不正确，请检查后重新输入"
+                print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+            fi
         else
             print_message $RED "❌ Bot Token不能为空"
         fi
@@ -238,10 +343,17 @@ setup_environment() {
     while true; do
         echo
         print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+        print_message $YELLOW "💡 提示: 在Telegram中搜索 @userinfobot，发送任意消息获取ID"
         read -p "Chat ID: " CHAT_ID
         
         if [ -n "$CHAT_ID" ]; then
-            break
+            # 简单验证Chat ID格式
+            if [[ "$CHAT_ID" =~ ^[0-9]+$ ]] || [[ "$CHAT_ID" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                break
+            else
+                print_message $RED "❌ Chat ID格式不正确，请检查后重新输入"
+                print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+            fi
         else
             print_message $RED "❌ Chat ID不能为空"
         fi
@@ -254,6 +366,7 @@ CHAT_ID=$CHAT_ID
 EOF
     
     print_message $GREEN "✅ 环境配置已保存到 .env 文件"
+    return 0
 }
 
 # 检查机器人状态
@@ -304,6 +417,8 @@ start_bot() {
     if ! $PYTHON_CMD -c "import telegram, dotenv, Crypto" 2>/dev/null; then
         print_message $YELLOW "⚠️ 依赖不完整，正在重新安装..."
         install_dependencies
+    else
+        print_message $GREEN "✅ 依赖检查通过"
     fi
     
     # 创建日志目录（如果不存在）
@@ -967,6 +1082,14 @@ show_menu() {
     echo -e "${CYAN}[7] 重新安装依赖${NC}"
     echo -e "${CYAN}[8] 检查/修复虚拟环境${NC}"
     echo -e "${CYAN}[9] 卸载机器人${NC}"
+    
+    # 根据配置状态显示不同选项
+    if [ -f "$ENV_FILE" ]; then
+        echo -e "${CYAN}[c] 重新配置Bot Token和Chat ID${NC}"
+    else
+        echo -e "${RED}[c] 配置Bot Token和Chat ID (必需)${NC}"
+    fi
+    
     echo -e "${CYAN}[0] 退出${NC}"
     echo
     echo -e "${YELLOW}💡 提示: Ctrl+C 已被屏蔽，请使用菜单选项退出${NC}"
@@ -1024,10 +1147,16 @@ main() {
         exit 1
     fi
     
-    setup_environment
-    if [ $? -ne 0 ]; then
-        print_message $RED "❌ 环境配置失败"
-        exit 1
+    # 检查环境配置
+    if [ ! -f "$ENV_FILE" ]; then
+        print_message $BLUE "⚙️ 首次运行，需要配置Bot Token和Chat ID..."
+        setup_environment
+        if [ $? -ne 0 ]; then
+            print_message $RED "❌ 环境配置失败"
+            exit 1
+        fi
+    else
+        print_message $GREEN "✅ 环境配置已存在"
     fi
     
     print_message $GREEN "✅ 初始化完成！"
@@ -1039,10 +1168,17 @@ main() {
     # 主菜单循环
     while true; do
         show_menu
-        read -p "请选择操作 [0-9]: " choice
+        read -p "请选择操作 [0-9c]: " choice
         
         case $choice in
             1)
+                # 检查配置是否完成
+                if [ ! -f "$ENV_FILE" ]; then
+                    print_message $RED "❌ 请先配置Bot Token和Chat ID"
+                    print_message $YELLOW "请选择选项 [c] 进行配置"
+                    read -p "按回车键继续..."
+                    continue
+                fi
                 start_bot
                 ;;
             2)
@@ -1069,11 +1205,18 @@ main() {
             9)
                 uninstall_bot
                 ;;
+            c|C)
+                print_message $BLUE "⚙️ 配置Bot Token和Chat ID..."
+                setup_environment
+                if [ $? -eq 0 ]; then
+                    print_message $GREEN "✅ 配置完成！现在可以启动机器人了"
+                fi
+                ;;
             0)
                 safe_exit
                 ;;
             *)
-                print_message $RED "❌ 无效选择，请输入 0-9 之间的数字"
+                print_message $RED "❌ 无效选择，请输入 0-9 或 c"
                 ;;
         esac
         

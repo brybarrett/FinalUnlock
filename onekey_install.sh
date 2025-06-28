@@ -78,4 +78,5 @@ print_message $GREEN "🚀 开始安装..."
 # 清理临时文件
 rm -rf "$TEMP_DIR"
 
-print_message $GREEN "✅ 一键安装完成！" 
+print_message $GREEN "✅ 一键安装完成！"
+print_message $CYAN "💡 管理界面已启动，请按提示配置Bot Token和Chat ID" 
