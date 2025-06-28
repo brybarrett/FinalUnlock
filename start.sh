@@ -1,0 +1,1086 @@
+#!/bin/bash
+
+# FinalShell 激活码机器人管理脚本
+# 作者: AI Assistant
+# 版本: 1.0
+# 项目地址: https://github.com/xymn2023/FinalUnlock
+
+# 屏蔽 Ctrl+C 信号
+trap '' SIGINT SIGTERM
+
+# 安全退出函数
+safe_exit() {
+    print_message $YELLOW "🔄 正在安全退出..."
+    print_message $CYAN "💡 如果机器人正在运行，它会继续在后台运行"
+    print_message $CYAN "💡 使用 'fn-bot' 命令可以随时管理机器人"
+    sleep 2
+    exit 0
+}
+
+# 紧急退出函数（用于卸载等操作）
+emergency_exit() {
+    print_message $RED "🛑 紧急退出..."
+    exit 1
+}
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# 项目配置
+GITHUB_REPO="https://github.com/xymn2023/FinalUnlock.git"
+PROJECT_NAME="FinalUnlock"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="$PROJECT_DIR/bot.pid"
+LOG_FILE="$PROJECT_DIR/bot.log"
+ENV_FILE="$PROJECT_DIR/.env"
+
+# 打印带颜色的消息
+print_message() {
+    local color=$1
+    local message=$2
+    echo -e "${color}${message}${NC}"
+}
+
+# 检查并下载项目
+download_project() {
+    print_message $BLUE "📥 检查项目文件..."
+    
+    # 检查是否在正确的项目目录
+    if [ -f "$PROJECT_DIR/bot.py" ] && [ -f "$PROJECT_DIR/py.py" ]; then
+        print_message $GREEN "✅ 项目文件已存在"
+        return 0
+    fi
+    
+    print_message $YELLOW "🔄 项目文件不完整，正在从GitHub下载..."
+    
+    # 检查git是否安装
+    if ! command -v git &> /dev/null; then
+        print_message $RED "❌ 未找到git，请先安装git"
+        print_message $YELLOW "Ubuntu/Debian: sudo apt-get install git"
+        print_message $YELLOW "CentOS/RHEL: sudo yum install git"
+        exit 1
+    fi
+    
+    # 备份当前目录（如果存在）
+    if [ -d "$PROJECT_DIR" ] && [ "$(ls -A $PROJECT_DIR)" ]; then
+        local backup_dir="$PROJECT_DIR.backup.$(date +%Y%m%d_%H%M%S)"
+        print_message $YELLOW "🔄 备份现有文件到: $backup_dir"
+        mv "$PROJECT_DIR" "$backup_dir"
+    fi
+    
+    # 创建新的项目目录
+    mkdir -p "$PROJECT_DIR"
+    cd "$PROJECT_DIR"
+    
+    # 克隆仓库
+    print_message $BLUE "🔄 正在克隆仓库: $GITHUB_REPO"
+    git clone "$GITHUB_REPO" .
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 项目下载完成"
+        
+        # 确保脚本有执行权限
+        chmod +x start.sh
+        
+        return 0
+    else
+        print_message $RED "❌ 项目下载失败"
+        return 1
+    fi
+}
+
+# 注册全局命令
+register_global_command() {
+    print_message $BLUE "🔧 注册全局命令 fn-bot..."
+    
+    # 获取脚本的绝对路径
+    local script_path="$PROJECT_DIR/start.sh"
+    
+    # 检查脚本是否存在
+    if [ ! -f "$script_path" ]; then
+        print_message $RED "❌ 脚本文件不存在: $script_path"
+        return 1
+    fi
+    
+    # 确保脚本有执行权限
+    chmod +x "$script_path"
+    
+    # 创建全局命令
+    local bin_dir="/usr/local/bin"
+    local command_path="$bin_dir/fn-bot"
+    
+    # 检查是否有权限写入 /usr/local/bin
+    if [ ! -w "$bin_dir" ]; then
+        print_message $YELLOW "⚠️ 没有权限写入 $bin_dir，尝试使用 sudo..."
+        sudo tee "$command_path" > /dev/null << EOF
+#!/bin/bash
+"$script_path" "\$@"
+EOF
+        sudo chmod +x "$command_path"
+    else
+        # 直接创建命令
+        tee "$command_path" > /dev/null << EOF
+#!/bin/bash
+"$script_path" "\$@"
+EOF
+        chmod +x "$command_path"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 全局命令 fn-bot 注册成功"
+        print_message $CYAN "现在可以在任意目录使用 'fn-bot' 命令启动机器人管理脚本"
+    else
+        print_message $RED "❌ 全局命令注册失败"
+        return 1
+    fi
+}
+
+# 检查全局命令是否已注册
+check_global_command() {
+    if command -v fn-bot &> /dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# 检查Python环境
+check_python() {
+    print_message $BLUE "🔍 检查Python环境..."
+    
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+        PIP_CMD="pip3"
+        print_message $GREEN "✅ 找到 python3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+        PIP_CMD="pip"
+        print_message $GREEN "✅ 找到 python"
+    else
+        print_message $RED "❌ 未找到Python环境，请先安装Python 3.7+"
+        exit 1
+    fi
+    
+    # 检查Python版本
+    local version=$($PYTHON_CMD --version 2>&1 | cut -d' ' -f2)
+    local major=$(echo $version | cut -d'.' -f1)
+    local minor=$(echo $version | cut -d'.' -f2)
+    
+    if [ "$major" -lt 3 ] || ([ "$major" -eq 3 ] && [ "$minor" -lt 7 ]); then
+        print_message $RED "❌ Python版本过低，需要Python 3.7+，当前版本: $version"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ Python版本检查通过: $version"
+}
+
+# 检查并安装依赖
+install_dependencies() {
+    print_message $BLUE "📦 检查并安装依赖..."
+    
+    # 检查requirements.txt是否存在
+    if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+        print_message $RED "❌ requirements.txt 文件不存在"
+        exit 1
+    fi
+    
+    # 升级pip
+    print_message $YELLOW "🔄 升级pip..."
+    $PIP_CMD install --upgrade pip
+    
+    # 安装依赖
+    print_message $YELLOW "📥 安装项目依赖..."
+    $PIP_CMD install -r "$PROJECT_DIR/requirements.txt"
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 依赖安装完成"
+    else
+        print_message $RED "❌ 依赖安装失败"
+        exit 1
+    fi
+}
+
+# 配置环境变量
+setup_environment() {
+    print_message $BLUE "⚙️ 配置环境变量..."
+    
+    # 检查.env文件是否存在
+    if [ -f "$ENV_FILE" ]; then
+        print_message $YELLOW "⚠️ 发现已存在的.env文件"
+        read -p "是否要重新配置? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_message $GREEN "✅ 使用现有配置"
+            return
+        fi
+    fi
+    
+    # 获取Bot Token
+    while true; do
+        echo
+        print_message $CYAN "请输入您的Bot Token (从 @BotFather 获取):"
+        read -p "Bot Token: " BOT_TOKEN
+        
+        if [ -n "$BOT_TOKEN" ]; then
+            break
+        else
+            print_message $RED "❌ Bot Token不能为空"
+        fi
+    done
+    
+    # 获取Chat ID
+    while true; do
+        echo
+        print_message $CYAN "请输入管理员的Chat ID (可通过 @userinfobot 获取):"
+        read -p "Chat ID: " CHAT_ID
+        
+        if [ -n "$CHAT_ID" ]; then
+            break
+        else
+            print_message $RED "❌ Chat ID不能为空"
+        fi
+    done
+    
+    # 创建.env文件
+    cat > "$ENV_FILE" << EOF
+BOT_TOKEN=$BOT_TOKEN
+CHAT_ID=$CHAT_ID
+EOF
+    
+    print_message $GREEN "✅ 环境配置已保存到 .env 文件"
+}
+
+# 检查机器人状态
+check_bot_status() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if ps -p $pid > /dev/null 2>&1; then
+            echo "running"
+            echo $pid
+        else
+            echo "stopped"
+        fi
+    else
+        echo "stopped"
+    fi
+}
+
+# 启动机器人
+start_bot() {
+    print_message $BLUE "🚀 启动机器人..."
+    
+    # 检查环境配置
+    if [ ! -f "$ENV_FILE" ]; then
+        print_message $RED "❌ 环境配置文件不存在"
+        print_message $YELLOW "请先配置Bot Token和Chat ID"
+        setup_environment
+    fi
+    
+    # 检查机器人文件
+    if [ ! -f "$PROJECT_DIR/bot.py" ]; then
+        print_message $RED "❌ 机器人文件不存在"
+        print_message $YELLOW "请先下载项目文件"
+        return 1
+    fi
+    
+    local status=$(check_bot_status)
+    if [ "$status" = "running" ]; then
+        print_message $YELLOW "⚠️ 机器人已在运行，正在重启..."
+        stop_bot
+        sleep 2
+    fi
+    
+    # 切换到项目目录
+    cd "$PROJECT_DIR"
+    
+    # 检查依赖
+    print_message $YELLOW "🔄 检查依赖..."
+    if ! $PYTHON_CMD -c "import telegram, dotenv, Crypto" 2>/dev/null; then
+        print_message $YELLOW "⚠️ 依赖不完整，正在重新安装..."
+        install_dependencies
+    fi
+    
+    # 创建日志目录（如果不存在）
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # 启动机器人（后台运行，脱离终端，实时日志记录）
+    print_message $YELLOW "🔄 正在启动机器人到后台..."
+    print_message $CYAN "💡 日志将实时记录到: $LOG_FILE"
+    
+    # 使用nohup启动，并实时记录日志
+    nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    
+    # 保存PID
+    echo $pid > "$PID_FILE"
+    
+    # 等待一下检查是否启动成功
+    sleep 3
+    if ps -p $pid > /dev/null 2>&1; then
+        print_message $GREEN "✅ 机器人启动成功 (PID: $pid)"
+        print_message $CYAN "💡 机器人已在后台运行，即使退出脚本也会继续运行"
+        print_message $CYAN "💡 使用 'fn-bot' 命令可以随时管理机器人"
+        print_message $CYAN "📋 实时日志文件: $LOG_FILE"
+        
+        # 显示启动日志
+        echo
+        print_message $CYAN "启动日志预览:"
+        if [ -f "$LOG_FILE" ]; then
+            tail -n 5 "$LOG_FILE" 2>/dev/null || print_message $YELLOW "暂无日志"
+        else
+            print_message $YELLOW "日志文件尚未创建"
+        fi
+        
+        # 提示用户如何查看实时日志
+        echo
+        print_message $YELLOW "💡 查看实时日志的方法:"
+        print_message $CYAN "  1. 使用菜单选项 [3] 查看实时日志"
+        print_message $CYAN "  2. 直接运行: tail -f $LOG_FILE"
+        print_message $CYAN "  3. 查看错误: grep -i error $LOG_FILE"
+        
+    else
+        print_message $RED "❌ 机器人启动失败"
+        print_message $YELLOW "请检查日志文件: $LOG_FILE"
+        rm -f "$PID_FILE"
+        
+        # 显示错误日志
+        if [ -f "$LOG_FILE" ]; then
+            echo
+            print_message $RED "错误日志:"
+            tail -n 10 "$LOG_FILE"
+        fi
+        
+        # 提供故障排除建议
+        echo
+        print_message $YELLOW "🔧 故障排除建议:"
+        print_message $CYAN "  1. 检查Bot Token和Chat ID是否正确"
+        print_message $CYAN "  2. 检查网络连接是否正常"
+        print_message $CYAN "  3. 检查依赖是否完整安装"
+        print_message $CYAN "  4. 查看完整日志: cat $LOG_FILE"
+    fi
+}
+
+# 停止机器人
+stop_bot() {
+    print_message $BLUE "🛑 停止机器人..."
+    
+    local status=$(check_bot_status)
+    if [ "$status" = "stopped" ]; then
+        print_message $YELLOW "⚠️ 机器人未在运行"
+        return
+    fi
+    
+    local pid=$(cat "$PID_FILE")
+    print_message $YELLOW "🔄 正在停止进程 (PID: $pid)..."
+    
+    # 使用kill -9强制停止
+    kill -9 $pid 2>/dev/null
+    
+    # 等待进程结束
+    local count=0
+    while ps -p $pid > /dev/null 2>&1 && [ $count -lt 10 ]; do
+        sleep 1
+        ((count++))
+    done
+    
+    if ps -p $pid > /dev/null 2>&1; then
+        print_message $RED "❌ 无法停止机器人进程"
+    else
+        print_message $GREEN "✅ 机器人已停止"
+        rm -f "$PID_FILE"
+    fi
+}
+
+# 查看实时日志
+view_logs() {
+    print_message $BLUE "📋 日志查看选项..."
+    
+    if [ ! -f "$LOG_FILE" ]; then
+        print_message $YELLOW "⚠️ 日志文件不存在"
+        return
+    fi
+    
+    echo
+    print_message $CYAN "请选择日志查看方式:"
+    echo -e "${CYAN}[1] 实时日志 (tail -f)${NC}"
+    echo -e "${CYAN}[2] 查看最后50行${NC}"
+    echo -e "${CYAN}[3] 查看最后100行${NC}"
+    echo -e "${CYAN}[4] 查看全部日志${NC}"
+    echo -e "${CYAN}[5] 搜索错误日志${NC}"
+    echo -e "${CYAN}[0] 返回${NC}"
+    echo
+    
+    read -p "请选择 [0-5]: " log_choice
+    
+    case $log_choice in
+        1)
+            print_message $BLUE "📋 查看实时日志 (按 Ctrl+C 退出)..."
+            tail -f "$LOG_FILE"
+            ;;
+        2)
+            print_message $BLUE "📋 最后50行日志:"
+            tail -n 50 "$LOG_FILE"
+            ;;
+        3)
+            print_message $BLUE "📋 最后100行日志:"
+            tail -n 100 "$LOG_FILE"
+            ;;
+        4)
+            print_message $BLUE "📋 全部日志:"
+            cat "$LOG_FILE"
+            ;;
+        5)
+            print_message $BLUE "📋 搜索错误日志:"
+            grep -i "error\|exception\|traceback\|failed" "$LOG_FILE" | tail -n 20
+            ;;
+        0)
+            return
+            ;;
+        *)
+            print_message $RED "❌ 无效选择"
+            ;;
+    esac
+}
+
+# 检查进程状态
+check_process() {
+    print_message $BLUE "🔍 检查进程状态..."
+    
+    local status=$(check_bot_status)
+    if [ "$status" = "running" ]; then
+        local pid=$(cat "$PID_FILE")
+        print_message $GREEN "✅ 机器人正在运行 (PID: $pid)"
+        
+        # 显示进程详细信息
+        echo
+        print_message $CYAN "进程详细信息:"
+        ps -p $pid -o pid,ppid,cmd,etime,pcpu,pmem
+    else
+        print_message $YELLOW "⚠️ 机器人未在运行"
+    fi
+}
+
+# 检查更新
+check_updates() {
+    print_message $BLUE "🔄 检查更新..."
+    
+    # 检查是否为Git仓库
+    if [ ! -d ".git" ]; then
+        print_message $YELLOW "⚠️ 当前目录不是Git仓库，正在重新克隆..."
+        cd "$PROJECT_DIR"
+        
+        # 备份现有文件
+        if [ -f "bot.py" ] || [ -f "py.py" ]; then
+            local backup_dir="$PROJECT_DIR.backup.$(date +%Y%m%d_%H%M%S)"
+            print_message $YELLOW "🔄 备份现有文件到: $backup_dir"
+            mkdir -p "$backup_dir"
+            cp -r * "$backup_dir/" 2>/dev/null || true
+        fi
+        
+        # 重新克隆仓库
+        print_message $BLUE "🔄 正在重新克隆仓库..."
+        rm -rf .git 2>/dev/null || true
+        git init
+        git remote add origin "$GITHUB_REPO"
+        git fetch origin
+        git checkout -f origin/main
+        
+        if [ $? -eq 0 ]; then
+            print_message $GREEN "✅ 仓库同步完成"
+            chmod +x start.sh
+            return 0
+        else
+            print_message $RED "❌ 仓库同步失败"
+            return 1
+        fi
+    fi
+    
+    # 检查网络连接
+    if ! ping -c 1 github.com > /dev/null 2>&1; then
+        print_message $RED "❌ 无法连接到GitHub，请检查网络连接"
+        return 1
+    fi
+    
+    # 获取远程更新
+    print_message $YELLOW "🔄 正在检查远程更新..."
+    git fetch origin
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 无法获取远程更新"
+        return 1
+    fi
+    
+    # 检查是否有更新
+    local behind=$(git rev-list HEAD..origin/main --count 2>/dev/null || echo "0")
+    local ahead=$(git rev-list origin/main..HEAD --count 2>/dev/null || echo "0")
+    
+    if [ "$behind" -gt 0 ]; then
+        print_message $YELLOW "🔄 发现 $behind 个更新"
+        print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
+        print_message $CYAN "最新版本: $(git rev-parse --short origin/main)"
+        
+        # 显示更新内容
+        echo
+        print_message $CYAN "更新内容预览:"
+        git log --oneline HEAD..origin/main --max-count=5
+        
+        echo
+        print_message $YELLOW "⚠️ 注意：更新操作需要用户手动确认"
+        read -p "是否更新到最新版本? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            # 再次确认
+            print_message $RED "⚠️ 确认更新操作"
+            read -p "此操作将覆盖本地文件，确认继续? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                print_message $YELLOW "❌ 取消更新操作"
+                return
+            fi
+            
+            # 停止机器人（如果正在运行）
+            local status=$(check_bot_status)
+            if [ "$status" = "running" ]; then
+                print_message $YELLOW "🔄 正在停止机器人以进行更新..."
+                stop_bot
+                sleep 2
+            fi
+            
+            # 执行更新
+            print_message $BLUE "🔄 正在更新到最新版本..."
+            git reset --hard origin/main
+            
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 更新完成"
+                
+                # 重新安装依赖（以防requirements.txt有更新）
+                print_message $YELLOW "🔄 检查依赖更新..."
+                install_dependencies
+                
+                # 如果机器人之前在运行，询问是否重启
+                if [ "$status" = "running" ]; then
+                    echo
+                    read -p "是否重启机器人? (y/N): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        start_bot
+                    fi
+                fi
+            else
+                print_message $RED "❌ 更新失败"
+                return 1
+            fi
+        else
+            print_message $YELLOW "❌ 取消更新"
+        fi
+    elif [ "$ahead" -gt 0 ]; then
+        print_message $YELLOW "⚠️ 本地版本领先远程版本 $ahead 个提交"
+        print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
+        print_message $CYAN "远程版本: $(git rev-parse --short origin/main)"
+    else
+        print_message $GREEN "✅ 已是最新版本"
+        print_message $CYAN "当前版本: $(git rev-parse --short HEAD)"
+    fi
+}
+
+# 检查依赖
+check_dependencies() {
+    print_message $BLUE "🔍 检查依赖..."
+    
+    local missing_deps=()
+    local version_info=()
+    
+    # 检查主要依赖
+    if ! $PYTHON_CMD -c "import telegram" 2>/dev/null; then
+        missing_deps+=("python-telegram-bot")
+    else
+        local version=$($PYTHON_CMD -c "import telegram; print(telegram.__version__)" 2>/dev/null || echo "未知版本")
+        version_info+=("python-telegram-bot: $version")
+    fi
+    
+    if ! $PYTHON_CMD -c "import dotenv" 2>/dev/null; then
+        missing_deps+=("python-dotenv")
+    else
+        local version=$($PYTHON_CMD -c "import dotenv; print(dotenv.__version__)" 2>/dev/null || echo "未知版本")
+        version_info+=("python-dotenv: $version")
+    fi
+    
+    if ! $PYTHON_CMD -c "import Crypto" 2>/dev/null; then
+        missing_deps+=("pycryptodome")
+    else
+        local version=$($PYTHON_CMD -c "import Crypto; print(Crypto.__version__)" 2>/dev/null || echo "未知版本")
+        version_info+=("pycryptodome: $version")
+    fi
+    
+    # 显示检查结果
+    echo
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有依赖已安装"
+        echo
+        print_message $CYAN "已安装的依赖版本:"
+        for info in "${version_info[@]}"; do
+            echo -e "  ${CYAN}• $info${NC}"
+        done
+    else
+        print_message $YELLOW "⚠️ 发现缺失依赖: ${missing_deps[*]}"
+        echo
+        print_message $CYAN "已安装的依赖版本:"
+        for info in "${version_info[@]}"; do
+            echo -e "  ${CYAN}• $info${NC}"
+        done
+        echo
+        print_message $YELLOW "缺失的依赖:"
+        for dep in "${missing_deps[@]}"; do
+            echo -e "  ${RED}• $dep${NC}"
+        done
+        echo
+        read -p "是否安装缺失的依赖? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            install_dependencies
+        fi
+    fi
+    
+    # 检查Python版本
+    echo
+    print_message $CYAN "Python环境信息:"
+    echo -e "  ${CYAN}• Python版本: $($PYTHON_CMD --version)${NC}"
+    echo -e "  ${CYAN}• Python路径: $(which $PYTHON_CMD)${NC}"
+    echo -e "  ${CYAN}• pip版本: $($PIP_CMD --version)${NC}"
+}
+
+# 重新安装依赖
+reinstall_dependencies() {
+    print_message $BLUE "🔄 重新安装依赖..."
+    
+    print_message $YELLOW "⚠️ 这将卸载并重新安装所有依赖"
+    read -p "确认继续? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        return
+    fi
+    
+    # 卸载现有依赖
+    print_message $YELLOW "🔄 卸载现有依赖..."
+    $PIP_CMD uninstall -y python-telegram-bot python-dotenv pycryptodome
+    
+    # 重新安装
+    install_dependencies
+}
+
+# 检查虚拟环境
+check_venv() {
+    print_message $BLUE "🔍 检查虚拟环境..."
+    
+    echo
+    if [ -n "$VIRTUAL_ENV" ]; then
+        print_message $GREEN "✅ 正在使用虚拟环境"
+        echo -e "  ${CYAN}• 虚拟环境路径: $VIRTUAL_ENV${NC}"
+        echo -e "  ${CYAN}• 虚拟环境名称: $(basename "$VIRTUAL_ENV")${NC}"
+    else
+        print_message $YELLOW "⚠️ 未使用虚拟环境"
+        echo -e "  ${YELLOW}• 当前使用系统Python${NC}"
+    fi
+    
+    # 检查是否有虚拟环境目录
+    if [ -d "venv" ]; then
+        echo
+        print_message $CYAN "发现本地虚拟环境目录: venv/"
+        read -p "是否激活本地虚拟环境? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $BLUE "🔄 激活虚拟环境..."
+            source venv/bin/activate
+            print_message $GREEN "✅ 虚拟环境已激活"
+            print_message $CYAN "请重新运行脚本以使用虚拟环境"
+            return
+        fi
+    fi
+    
+    echo
+    print_message $CYAN "虚拟环境选项:"
+    echo -e "${CYAN}[1] 创建新的虚拟环境${NC}"
+    echo -e "${CYAN}[2] 删除现有虚拟环境${NC}"
+    echo -e "${CYAN}[3] 重新创建虚拟环境${NC}"
+    echo -e "${CYAN}[0] 返回${NC}"
+    echo
+    
+    read -p "请选择 [0-3]: " venv_choice
+    
+    case $venv_choice in
+        1)
+            if [ -d "venv" ]; then
+                print_message $YELLOW "⚠️ 虚拟环境已存在"
+                read -p "是否覆盖? (y/N): " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    return
+                fi
+                rm -rf venv
+            fi
+            print_message $BLUE "🔄 创建虚拟环境..."
+            $PYTHON_CMD -m venv venv
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 虚拟环境创建成功"
+                print_message $CYAN "激活命令: source venv/bin/activate"
+            else
+                print_message $RED "❌ 虚拟环境创建失败"
+            fi
+            ;;
+        2)
+            if [ -d "venv" ]; then
+                print_message $YELLOW "⚠️ 确认删除虚拟环境?"
+                read -p "此操作不可逆 (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    rm -rf venv
+                    print_message $GREEN "✅ 虚拟环境已删除"
+                fi
+            else
+                print_message $YELLOW "⚠️ 虚拟环境不存在"
+            fi
+            ;;
+        3)
+            print_message $BLUE "🔄 重新创建虚拟环境..."
+            rm -rf venv 2>/dev/null || true
+            $PYTHON_CMD -m venv venv
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 虚拟环境重新创建成功"
+                print_message $CYAN "激活命令: source venv/bin/activate"
+            else
+                print_message $RED "❌ 虚拟环境创建失败"
+            fi
+            ;;
+        0)
+            return
+            ;;
+        *)
+            print_message $RED "❌ 无效选择"
+            ;;
+    esac
+}
+
+# 卸载机器人
+uninstall_bot() {
+    print_message $BLUE "🗑️ 卸载机器人..."
+    
+    print_message $RED "⚠️ 这将停止机器人并强制删除 FinalUnlock 目录及其所有文件"
+    print_message $RED "⚠️ 此操作不可逆，请谨慎操作！"
+    echo
+    read -p "请输入 'yes' 确认删除: " confirm
+    
+    if [ "$confirm" != "yes" ]; then
+        print_message $YELLOW "❌ 取消卸载操作"
+        return
+    fi
+    
+    # 停止机器人
+    stop_bot
+    
+    # 删除全局命令
+    print_message $YELLOW "🔄 正在删除全局命令 fn-bot..."
+    local command_path="/usr/local/bin/fn-bot"
+    if [ -f "$command_path" ]; then
+        if [ -w "$command_path" ]; then
+            rm -f "$command_path"
+        else
+            sudo rm -f "$command_path"
+        fi
+        print_message $GREEN "✅ 全局命令 fn-bot 已删除"
+    fi
+    
+    # 强制删除 FinalUnlock 目录及其所有文件
+    print_message $YELLOW "🔄 正在删除 FinalUnlock 目录..."
+    
+    # 获取项目目录的父目录
+    local parent_dir=$(dirname "$PROJECT_DIR")
+    local project_name=$(basename "$PROJECT_DIR")
+    
+    # 切换到父目录
+    cd "$parent_dir"
+    
+    # 强制删除整个项目目录
+    rm -rf "$project_name"
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ FinalUnlock 目录已完全删除"
+        print_message $YELLOW "脚本将在3秒后退出..."
+        sleep 3
+        emergency_exit
+    else
+        print_message $RED "❌ 删除失败，请手动删除"
+        emergency_exit
+    fi
+}
+
+# 日志管理功能
+manage_logs() {
+    print_message $BLUE "📋 日志管理..."
+    
+    if [ ! -f "$LOG_FILE" ]; then
+        print_message $YELLOW "⚠️ 日志文件不存在"
+        return
+    fi
+    
+    # 获取日志文件信息
+    local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
+    local log_lines=$(wc -l < "$LOG_FILE" 2>/dev/null || echo "0")
+    local last_modified=$(stat -c %y "$LOG_FILE" 2>/dev/null | cut -d' ' -f1,2 || echo "未知")
+    
+    echo
+    print_message $CYAN "日志文件信息:"
+    echo -e "  ${CYAN}• 文件路径: $LOG_FILE${NC}"
+    echo -e "  ${CYAN}• 文件大小: $log_size${NC}"
+    echo -e "  ${CYAN}• 行数: $log_lines${NC}"
+    echo -e "  ${CYAN}• 最后修改: $last_modified${NC}"
+    echo
+    
+    print_message $CYAN "日志管理选项:"
+    echo -e "${CYAN}[1] 查看实时日志${NC}"
+    echo -e "${CYAN}[2] 查看最后50行${NC}"
+    echo -e "${CYAN}[3] 查看最后100行${NC}"
+    echo -e "${CYAN}[4] 查看全部日志${NC}"
+    echo -e "${CYAN}[5] 搜索错误日志${NC}"
+    echo -e "${CYAN}[6] 搜索警告日志${NC}"
+    echo -e "${CYAN}[7] 搜索特定关键词${NC}"
+    echo -e "${CYAN}[8] 清空日志文件${NC}"
+    echo -e "${CYAN}[9] 压缩日志文件${NC}"
+    echo -e "${CYAN}[0] 返回${NC}"
+    echo
+    
+    read -p "请选择 [0-9]: " log_choice
+    
+    case $log_choice in
+        1)
+            print_message $BLUE "📋 查看实时日志 (按 Ctrl+C 退出)..."
+            tail -f "$LOG_FILE"
+            ;;
+        2)
+            print_message $BLUE "📋 最后50行日志:"
+            tail -n 50 "$LOG_FILE"
+            ;;
+        3)
+            print_message $BLUE "📋 最后100行日志:"
+            tail -n 100 "$LOG_FILE"
+            ;;
+        4)
+            print_message $BLUE "📋 全部日志:"
+            cat "$LOG_FILE"
+            ;;
+        5)
+            print_message $BLUE "📋 搜索错误日志:"
+            echo -e "${RED}错误信息:${NC}"
+            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20
+            ;;
+        6)
+            print_message $BLUE "📋 搜索警告日志:"
+            echo -e "${YELLOW}警告信息:${NC}"
+            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20
+            ;;
+        7)
+            print_message $BLUE "📋 搜索特定关键词:"
+            read -p "请输入搜索关键词: " keyword
+            if [ -n "$keyword" ]; then
+                print_message $BLUE "📋 搜索结果:"
+                grep -i "$keyword" "$LOG_FILE" | tail -n 20
+            else
+                print_message $RED "❌ 关键词不能为空"
+            fi
+            ;;
+        8)
+            print_message $RED "⚠️ 确认清空日志文件?"
+            read -p "此操作不可逆 (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                > "$LOG_FILE"
+                print_message $GREEN "✅ 日志文件已清空"
+            else
+                print_message $YELLOW "❌ 取消清空操作"
+            fi
+            ;;
+        9)
+            print_message $BLUE "📋 压缩日志文件..."
+            local backup_log="$LOG_FILE.backup.$(date +%Y%m%d_%H%M%S)"
+            cp "$LOG_FILE" "$backup_log"
+            gzip "$backup_log"
+            print_message $GREEN "✅ 日志已备份并压缩: $backup_log.gz"
+            ;;
+        0)
+            return
+            ;;
+        *)
+            print_message $RED "❌ 无效选择"
+            ;;
+    esac
+}
+
+# 显示菜单
+show_menu() {
+    local status=$(check_bot_status)
+    local status_text="❌ 未运行"
+    local pid_info=""
+    
+    if [ "$status" = "running" ]; then
+        local pid=$(cat "$PID_FILE")
+        status_text="✅ 正在运行"
+        pid_info=" (PID: $pid)"
+    fi
+    
+    clear
+    echo -e "${PURPLE}================================${NC}"
+    echo -e "${PURPLE}    FinalShell 机器人管理菜单${NC}"
+    echo -e "${PURPLE}================================${NC}"
+    echo -e "当前状态: ${status_text}${pid_info}"
+    
+    # 显示系统信息
+    echo -e "${CYAN}Python版本: $($PYTHON_CMD --version 2>&1 | cut -d' ' -f2)${NC}"
+    echo -e "${CYAN}项目路径: $PROJECT_DIR${NC}"
+    
+    # 显示环境配置状态
+    if [ -f "$ENV_FILE" ]; then
+        echo -e "${GREEN}配置状态: ✅ 已配置${NC}"
+    else
+        echo -e "${RED}配置状态: ❌ 未配置${NC}"
+    fi
+    
+    # 显示日志文件状态
+    if [ -f "$LOG_FILE" ]; then
+        local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
+        echo -e "${CYAN}日志文件: $LOG_FILE (${log_size})${NC}"
+    else
+        echo -e "${YELLOW}日志文件: 不存在${NC}"
+    fi
+    
+    echo
+    echo -e "${CYAN}[1] 启动/重启机器人${NC}"
+    echo -e "${CYAN}[2] 停止机器人${NC}"
+    echo -e "${CYAN}[3] 日志管理${NC}"
+    echo -e "${CYAN}[4] 检查进程状态${NC}"
+    echo -e "${CYAN}[5] 检查并安装更新${NC}"
+    echo -e "${CYAN}[6] 检查/修复依赖${NC}"
+    echo -e "${CYAN}[7] 重新安装依赖${NC}"
+    echo -e "${CYAN}[8] 检查/修复虚拟环境${NC}"
+    echo -e "${CYAN}[9] 卸载机器人${NC}"
+    echo -e "${CYAN}[0] 退出${NC}"
+    echo
+    echo -e "${YELLOW}💡 提示: Ctrl+C 已被屏蔽，请使用菜单选项退出${NC}"
+    echo
+}
+
+# 主函数
+main() {
+    # 显示欢迎信息
+    clear
+    echo -e "${PURPLE}================================${NC}"
+    echo -e "${PURPLE}  FinalShell 激活码机器人管理器${NC}"
+    echo -e "${PURPLE}================================${NC}"
+    echo -e "${CYAN}项目地址: ${GITHUB_REPO}${NC}"
+    echo -e "${CYAN}版本: 1.0${NC}"
+    echo
+    
+    # 检查并下载项目
+    print_message $BLUE "🔍 检查项目文件..."
+    download_project
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 项目下载失败，请检查网络连接"
+        print_message $YELLOW "请确保网络连接正常，并且可以访问GitHub"
+        exit 1
+    fi
+    
+    # 检查是否在项目目录
+    if [ ! -f "$PROJECT_DIR/bot.py" ]; then
+        print_message $RED "❌ 项目文件不完整，请重新运行脚本"
+        exit 1
+    fi
+    
+    # 检查并注册全局命令
+    if ! check_global_command; then
+        print_message $YELLOW "🔧 检测到首次运行，正在注册全局命令..."
+        register_global_command
+        if [ $? -ne 0 ]; then
+            print_message $YELLOW "⚠️ 全局命令注册失败，但脚本仍可正常使用"
+        fi
+    else
+        print_message $GREEN "✅ 全局命令 fn-bot 已注册"
+    fi
+    
+    # 初始化检查
+    print_message $BLUE "🔍 开始环境初始化..."
+    check_python
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ Python环境检查失败"
+        exit 1
+    fi
+    
+    install_dependencies
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 依赖安装失败"
+        exit 1
+    fi
+    
+    setup_environment
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 环境配置失败"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ 初始化完成！"
+    print_message $CYAN "💡 提示：现在可以在任意目录使用 'fn-bot' 命令启动此脚本"
+    print_message $YELLOW "⚠️ 注意：Ctrl+C 已被屏蔽，请使用菜单选项退出"
+    print_message $BLUE "🚀 正在启动管理界面..."
+    sleep 2
+    
+    # 主菜单循环
+    while true; do
+        show_menu
+        read -p "请选择操作 [0-9]: " choice
+        
+        case $choice in
+            1)
+                start_bot
+                ;;
+            2)
+                stop_bot
+                ;;
+            3)
+                manage_logs
+                ;;
+            4)
+                check_process
+                ;;
+            5)
+                check_updates
+                ;;
+            6)
+                check_dependencies
+                ;;
+            7)
+                reinstall_dependencies
+                ;;
+            8)
+                check_venv
+                ;;
+            9)
+                uninstall_bot
+                ;;
+            0)
+                safe_exit
+                ;;
+            *)
+                print_message $RED "❌ 无效选择，请输入 0-9 之间的数字"
+                ;;
+        esac
+        
+        echo
+        read -p "按回车键继续..."
+    done
+}
+
+# 运行主函数
+main 
