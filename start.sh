@@ -927,6 +927,14 @@ check_updates() {
         print_message $YELLOW "⚠️ 当前目录不是Git仓库，正在重新克隆..."
         cd "$PROJECT_DIR"
         
+        # 备份配置文件
+        local env_backup=""
+        if [ -f "$ENV_FILE" ]; then
+            env_backup="$ENV_FILE.backup.$(date +%Y%m%d_%H%M%S)"
+            print_message $BLUE "🔄 备份配置文件: $env_backup"
+            cp "$ENV_FILE" "$env_backup"
+        fi
+        
         # 备份现有文件
         if [ -f "bot.py" ] || [ -f "py.py" ]; then
             local backup_dir="$PROJECT_DIR.backup.$(date +%Y%m%d_%H%M%S)"
@@ -945,10 +953,28 @@ check_updates() {
         
         if [ $? -eq 0 ]; then
             print_message $GREEN "✅ 仓库同步完成"
+            
+            # 恢复配置文件
+            if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
+                print_message $BLUE "🔄 恢复配置文件..."
+                cp "$env_backup" "$ENV_FILE"
+                print_message $GREEN "✅ 配置文件已恢复"
+                rm -f "$env_backup"
+            fi
+            
             chmod +x start.sh
             return 0
         else
             print_message $RED "❌ 仓库同步失败"
+            
+            # 恢复配置文件（即使同步失败）
+            if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
+                print_message $BLUE "🔄 恢复配置文件..."
+                cp "$env_backup" "$ENV_FILE"
+                print_message $GREEN "✅ 配置文件已恢复"
+                rm -f "$env_backup"
+            fi
+            
             return 1
         fi
     fi
@@ -1004,12 +1030,30 @@ check_updates() {
                 sleep 2
             fi
             
+            # 备份配置文件
+            local env_backup=""
+            if [ -f "$ENV_FILE" ]; then
+                env_backup="$ENV_FILE.backup.$(date +%Y%m%d_%H%M%S)"
+                print_message $BLUE "🔄 备份配置文件: $env_backup"
+                cp "$ENV_FILE" "$env_backup"
+            fi
+            
             # 执行更新
             print_message $BLUE "🔄 正在更新到最新版本..."
             git reset --hard origin/main
             
             if [ $? -eq 0 ]; then
                 print_message $GREEN "✅ 更新完成"
+                
+                # 恢复配置文件
+                if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
+                    print_message $BLUE "🔄 恢复配置文件..."
+                    cp "$env_backup" "$ENV_FILE"
+                    print_message $GREEN "✅ 配置文件已恢复"
+                    
+                    # 清理备份文件
+                    rm -f "$env_backup"
+                fi
                 
                 # 重新安装依赖（以防requirements.txt有更新）
                 print_message $YELLOW "🔄 检查依赖更新..."
@@ -1026,6 +1070,15 @@ check_updates() {
                 fi
             else
                 print_message $RED "❌ 更新失败"
+                
+                # 恢复配置文件（即使更新失败）
+                if [ -n "$env_backup" ] && [ -f "$env_backup" ]; then
+                    print_message $BLUE "🔄 恢复配置文件..."
+                    cp "$env_backup" "$ENV_FILE"
+                    print_message $GREEN "✅ 配置文件已恢复"
+                    rm -f "$env_backup"
+                fi
+                
                 return 1
             fi
         else
