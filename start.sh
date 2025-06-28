@@ -661,8 +661,13 @@ EOF
 check_bot_status() {
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
-        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-            echo "running"
+        if [ -n "$pid" ]; then
+            # 使用多种方法检查进程是否存在
+            if ps -p $pid > /dev/null 2>&1 || kill -0 $pid 2>/dev/null; then
+                echo "running"
+            else
+                echo "stopped"
+            fi
         else
             echo "stopped"
         fi
@@ -962,17 +967,43 @@ check_process() {
     print_message $BLUE "🔍 检查进程状态..."
     
     local status=$(check_bot_status)
-    if [ "$status" = "running" ]; then
-        local pid=$(cat "$PID_FILE")
-        print_message $GREEN "✅ 机器人正在运行 (PID: $pid)"
+    print_message $CYAN "状态检测结果: $status"
+    
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        print_message $CYAN "PID文件内容: $pid"
         
-        # 显示进程详细信息
-        echo
-        print_message $CYAN "进程详细信息:"
-        ps -p $pid -o pid,ppid,cmd,etime,pcpu,pmem
+        if [ -n "$pid" ]; then
+            print_message $CYAN "检查进程 $pid 是否存在..."
+            
+            # 使用多种方法检查进程
+            if ps -p $pid > /dev/null 2>&1; then
+                print_message $GREEN "✅ ps -p 检测到进程存在"
+            else
+                print_message $YELLOW "⚠️ ps -p 未检测到进程"
+            fi
+            
+            if kill -0 $pid 2>/dev/null; then
+                print_message $GREEN "✅ kill -0 检测到进程存在"
+            else
+                print_message $YELLOW "⚠️ kill -0 未检测到进程"
+            fi
+            
+            # 显示进程详细信息
+            echo
+            print_message $CYAN "进程详细信息:"
+            ps -p $pid -o pid,ppid,cmd,etime,pcpu,pmem 2>/dev/null || print_message $YELLOW "无法获取进程信息"
+        else
+            print_message $YELLOW "⚠️ PID文件为空"
+        fi
     else
-        print_message $YELLOW "⚠️ 机器人未在运行"
+        print_message $YELLOW "⚠️ PID文件不存在"
     fi
+    
+    # 检查所有python进程
+    echo
+    print_message $CYAN "所有Python进程:"
+    ps aux | grep python | grep -v grep || print_message $YELLOW "未找到Python进程"
     
     echo
     read -p "按任意键返回..." -n 1 -r
