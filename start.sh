@@ -840,50 +840,97 @@ view_logs() {
     
     case $log_choice in
         1)
-            print_message $BLUE "📋 查看实时日志..."
-            print_message $YELLOW "💡 提示: 按 Ctrl+C 退出实时日志查看"
+            print_message $BLUE "📋 实时日志（任意键返回主菜单）..."
+            print_message $YELLOW "💡 正在显示实时日志，按任意键返回主菜单..."
             echo
-            tail -f "$LOG_FILE"
+            # 使用更可靠的方法：先显示一些日志，然后等待按键
+            tail -n 10 "$LOG_FILE" 2>/dev/null
             echo
-            print_message $CYAN "实时日志查看已结束"
-            read -p "按任意键返回..." -n 1 -r
+            print_message $CYAN "=== 实时日志开始 ==="
+            print_message $YELLOW "按任意键返回主菜单..."
+            # 启动tail -f在后台，但限制输出行数避免阻塞
+            timeout 30 tail -f "$LOG_FILE" 2>/dev/null &
+            TAIL_PID=$!
+            # 等待用户按键
+            read -n 1 -s
+            # 立即停止tail进程
+            kill $TAIL_PID 2>/dev/null
+            wait $TAIL_PID 2>/dev/null
             echo
+            print_message $CYAN "已返回主菜单"
             ;;
         2)
-            print_message $BLUE "📋 最后50行日志:"
+            print_message $BLUE "📋 最后50行日志（任意键返回主菜单）..."
+            tail -n 50 "$LOG_FILE" 2>/dev/null
             echo
-            tail -n 50 "$LOG_FILE"
+            print_message $YELLOW "按任意键返回主菜单..."
+            read -n 1 -s
             echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         3)
-            print_message $BLUE "📋 最后100行日志:"
+            print_message $BLUE "📋 最后100行日志（任意键返回主菜单）..."
+            tail -n 100 "$LOG_FILE" 2>/dev/null
             echo
-            tail -n 100 "$LOG_FILE"
+            print_message $YELLOW "按任意键返回主菜单..."
+            read -n 1 -s
             echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         4)
-            print_message $BLUE "📋 全部日志:"
+            print_message $BLUE "📋 全部日志（任意键返回主菜单）..."
+            print_message $YELLOW "💡 正在显示全部日志，按任意键返回主菜单..."
             echo
-            cat "$LOG_FILE"
+            # 使用less或more来分页显示，但提供退出选项
+            if command -v less &> /dev/null; then
+                less -R "$LOG_FILE"
+            elif command -v more &> /dev/null; then
+                more "$LOG_FILE"
+            else
+                cat "$LOG_FILE" 2>/dev/null
+                echo
+                print_message $YELLOW "按任意键返回主菜单..."
+                read -n 1 -s
+            fi
             echo
-            print_message $CYAN "日志查看完成"
-            read -p "按任意键返回..." -n 1 -r
-            echo
+            print_message $CYAN "已返回主菜单"
             ;;
         5)
-            print_message $BLUE "📋 搜索错误日志:"
+            print_message $BLUE "📋 搜索错误日志（任意键返回主菜单）..."
+            echo -e "${RED}错误信息:${NC}"
+            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20 2>/dev/null
             echo
-            grep -i "error\|exception\|traceback\|failed" "$LOG_FILE" | tail -n 20
+            print_message $YELLOW "按任意键返回主菜单..."
+            read -n 1 -s
             echo
-            print_message $CYAN "错误日志搜索完成"
-            read -p "按任意键返回..." -n 1 -r
+            print_message $CYAN "已返回主菜单"
+            ;;
+        6)
+            print_message $BLUE "📋 搜索警告日志（任意键返回主菜单）..."
+            echo -e "${YELLOW}警告信息:${NC}"
+            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20 2>/dev/null
             echo
+            print_message $YELLOW "按任意键返回主菜单..."
+            read -n 1 -s
+            echo
+            print_message $CYAN "已返回主菜单"
+            ;;
+        7)
+            print_message $BLUE "📋 搜索特定关键词（任意键返回主菜单）..."
+            read -p "请输入搜索关键词: " keyword
+            if [ -n "$keyword" ]; then
+                print_message $BLUE "📋 搜索结果:"
+                echo
+                grep -i "$keyword" "$LOG_FILE" | tail -n 20 2>/dev/null
+                echo
+                print_message $YELLOW "按任意键返回主菜单..."
+                read -n 1 -s
+                echo
+                print_message $CYAN "已返回主菜单"
+            else
+                print_message $RED "❌ 关键词不能为空"
+                sleep 1
+            fi
             ;;
         0)
             return
@@ -1414,9 +1461,19 @@ manage_logs() {
     case $log_choice in
         1)
             print_message $BLUE "📋 实时日志（任意键返回主菜单）..."
-            tail -f "$LOG_FILE" &
+            print_message $YELLOW "💡 正在显示实时日志，按任意键返回主菜单..."
+            echo
+            # 使用更可靠的方法：先显示一些日志，然后等待按键
+            tail -n 10 "$LOG_FILE" 2>/dev/null
+            echo
+            print_message $CYAN "=== 实时日志开始 ==="
+            print_message $YELLOW "按任意键返回主菜单..."
+            # 启动tail -f在后台，但限制输出行数避免阻塞
+            timeout 30 tail -f "$LOG_FILE" 2>/dev/null &
             TAIL_PID=$!
+            # 等待用户按键
             read -n 1 -s
+            # 立即停止tail进程
             kill $TAIL_PID 2>/dev/null
             wait $TAIL_PID 2>/dev/null
             echo
@@ -1424,51 +1481,57 @@ manage_logs() {
             ;;
         2)
             print_message $BLUE "📋 最后50行日志（任意键返回主菜单）..."
-            tail -n 50 "$LOG_FILE" &
-            TAIL_PID=$!
+            tail -n 50 "$LOG_FILE" 2>/dev/null
+            echo
+            print_message $YELLOW "按任意键返回主菜单..."
             read -n 1 -s
-            kill $TAIL_PID 2>/dev/null
-            wait $TAIL_PID 2>/dev/null
             echo
             print_message $CYAN "已返回主菜单"
             ;;
         3)
             print_message $BLUE "📋 最后100行日志（任意键返回主菜单）..."
-            tail -n 100 "$LOG_FILE" &
-            TAIL_PID=$!
+            tail -n 100 "$LOG_FILE" 2>/dev/null
+            echo
+            print_message $YELLOW "按任意键返回主菜单..."
             read -n 1 -s
-            kill $TAIL_PID 2>/dev/null
-            wait $TAIL_PID 2>/dev/null
             echo
             print_message $CYAN "已返回主菜单"
             ;;
         4)
             print_message $BLUE "📋 全部日志（任意键返回主菜单）..."
-            cat "$LOG_FILE" &
-            CAT_PID=$!
-            read -n 1 -s
-            kill $CAT_PID 2>/dev/null
-            wait $CAT_PID 2>/dev/null
+            print_message $YELLOW "💡 正在显示全部日志，按任意键返回主菜单..."
+            echo
+            # 使用less或more来分页显示，但提供退出选项
+            if command -v less &> /dev/null; then
+                less -R "$LOG_FILE"
+            elif command -v more &> /dev/null; then
+                more "$LOG_FILE"
+            else
+                cat "$LOG_FILE" 2>/dev/null
+                echo
+                print_message $YELLOW "按任意键返回主菜单..."
+                read -n 1 -s
+            fi
             echo
             print_message $CYAN "已返回主菜单"
             ;;
         5)
             print_message $BLUE "📋 搜索错误日志（任意键返回主菜单）..."
-            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20 &
-            GREP_PID=$!
+            echo -e "${RED}错误信息:${NC}"
+            grep -i "error\|exception\|traceback\|failed\|critical" "$LOG_FILE" | tail -n 20 2>/dev/null
+            echo
+            print_message $YELLOW "按任意键返回主菜单..."
             read -n 1 -s
-            kill $GREP_PID 2>/dev/null
-            wait $GREP_PID 2>/dev/null
             echo
             print_message $CYAN "已返回主菜单"
             ;;
         6)
             print_message $BLUE "📋 搜索警告日志（任意键返回主菜单）..."
-            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20 &
-            GREP_PID=$!
+            echo -e "${YELLOW}警告信息:${NC}"
+            grep -i "warning\|warn" "$LOG_FILE" | tail -n 20 2>/dev/null
+            echo
+            print_message $YELLOW "按任意键返回主菜单..."
             read -n 1 -s
-            kill $GREP_PID 2>/dev/null
-            wait $GREP_PID 2>/dev/null
             echo
             print_message $CYAN "已返回主菜单"
             ;;
@@ -1476,11 +1539,12 @@ manage_logs() {
             print_message $BLUE "📋 搜索特定关键词（任意键返回主菜单）..."
             read -p "请输入搜索关键词: " keyword
             if [ -n "$keyword" ]; then
-                grep -i "$keyword" "$LOG_FILE" | tail -n 20 &
-                GREP_PID=$!
+                print_message $BLUE "📋 搜索结果:"
+                echo
+                grep -i "$keyword" "$LOG_FILE" | tail -n 20 2>/dev/null
+                echo
+                print_message $YELLOW "按任意键返回主菜单..."
                 read -n 1 -s
-                kill $GREP_PID 2>/dev/null
-                wait $GREP_PID 2>/dev/null
                 echo
                 print_message $CYAN "已返回主菜单"
             else
