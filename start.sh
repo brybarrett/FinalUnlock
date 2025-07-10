@@ -150,19 +150,39 @@ check_global_command() {
     fi
 }
 
-# 检查Python环境
+# 检查Python3环境
 check_python() {
-    print_message $BLUE "🔍 检查Python环境..."
+    print_message $BLUE "🔍 检查Python3环境..."
     
     if command -v python3 &> /dev/null; then
         PYTHON_CMD="python3"
         print_message $GREEN "✅ 找到 python3"
-    elif command -v python &> /dev/null; then
-        PYTHON_CMD="python"
-        print_message $GREEN "✅ 找到 python"
     else
-        print_message $RED "❌ 未找到Python环境，请先安装Python 3.7+"
-        exit 1
+        print_message $YELLOW "⚠️ 未找到python3，尝试自动安装..."
+        # 自动安装python3
+        if command -v apt-get &> /dev/null; then
+            print_message $YELLOW "🔄 使用apt-get安装python3..."
+            sudo apt-get update
+            sudo apt-get install -y python3
+        elif command -v yum &> /dev/null; then
+            print_message $YELLOW "🔄 使用yum安装python3..."
+            sudo yum install -y python3
+        elif command -v dnf &> /dev/null; then
+            print_message $YELLOW "🔄 使用dnf安装python3..."
+            sudo dnf install -y python3
+        else
+            print_message $RED "❌ 无法识别系统包管理器，无法自动安装python3"
+            print_message $YELLOW "请手动安装python3后重试"
+            exit 1
+        fi
+        # 安装后再次检测
+        if command -v python3 &> /dev/null; then
+            PYTHON_CMD="python3"
+            print_message $GREEN "✅ python3安装成功"
+        else
+            print_message $RED "❌ python3安装失败，请手动安装后重试"
+            exit 1
+        fi
     fi
     
     # 检查Python版本
@@ -181,16 +201,13 @@ check_python() {
     if command -v pip3 &> /dev/null; then
         PIP_CMD="pip3"
         print_message $GREEN "✅ 找到 pip3"
-    elif command -v pip &> /dev/null; then
-        PIP_CMD="pip"
-        print_message $GREEN "✅ 找到 pip"
     else
-        print_message $YELLOW "⚠️ 未找到pip，尝试使用python -m pip..."
+        print_message $YELLOW "⚠️ 未找到pip3，尝试使用python3 -m pip..."
         if $PYTHON_CMD -m pip --version &> /dev/null; then
             PIP_CMD="$PYTHON_CMD -m pip"
-            print_message $GREEN "✅ 找到 python -m pip"
+            print_message $GREEN "✅ 找到 python3 -m pip"
         else
-            print_message $YELLOW "⚠️ 未找到pip，尝试安装..."
+            print_message $YELLOW "⚠️ 未找到pip3，尝试安装..."
             install_pip
         fi
     fi
