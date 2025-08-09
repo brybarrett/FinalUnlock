@@ -106,6 +106,12 @@ CHAT_ID=管理员的Telegram用户ID（多个用英文逗号分隔）
 
 如有建议或问题，欢迎提交 issue 或 PR。 
 
-# Star History
+## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xymn2023/FinalUnlock&type=Date)](https://www.star-history.com/#xymn2023/FinalUnlock&Date)
+<a href="https://www.star-history.com/#xymn2023/FinalUnlock&Timeline">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=xymn2023/FinalUnlock&type=Timeline&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=xymn2023/FinalUnlock&type=Timeline" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=xymn2023/FinalUnlock&type=Timeline" />
+ </picture>
+</a>
