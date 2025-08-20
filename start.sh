@@ -136,15 +136,15 @@ register_global_command() {
         # 检查目录是否存在且可写
         if [ -d "$bin_dir" ]; then
             if [ -w "$bin_dir" ]; then
-                # 直接创建命令
+        # 直接创建命令
                 print_message $CYAN "📝 在 $bin_dir 创建全局命令..."
-                tee "$command_path" > /dev/null << EOF
+        tee "$command_path" > /dev/null << EOF
 #!/bin/bash
 "$script_path" "\$@"
 EOF
-                chmod +x "$command_path"
-                
-                if [ $? -eq 0 ]; then
+        chmod +x "$command_path"
+    
+    if [ $? -eq 0 ]; then
                     print_message $GREEN "✅ 全局命令 fn-bot 注册成功: $command_path"
                     success=true
                     break
@@ -973,7 +973,7 @@ force_restart_bot() {
         
         # 验证启动
         sleep 3
-        if ps -p $pid > /dev/null 2>&1; then
+    if ps -p $pid > /dev/null 2>&1; then
             print_message $GREEN "✅ 进程运行正常"
         else
             print_message $RED "❌ 进程启动后异常退出，请检查日志"
@@ -1035,7 +1035,7 @@ stop_bot() {
     pkill -f "bot.py" 2>/dev/null || true
     
     # 清理PID文件
-    rm -f "$PID_FILE"
+        rm -f "$PID_FILE"
     
     # 验证是否完全停止
     local remaining_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
@@ -1879,44 +1879,44 @@ reinstall_dependencies() {
 # 检查虚拟环境
 check_venv() {
     while true; do
-        print_message $BLUE "🔍 检查虚拟环境..."
-        
+    print_message $BLUE "🔍 检查虚拟环境..."
+    
+    echo
+    if [ -n "$VIRTUAL_ENV" ]; then
+        print_message $GREEN "✅ 正在使用虚拟环境"
+        echo -e "  ${CYAN}• 虚拟环境路径: $VIRTUAL_ENV${NC}"
+        echo -e "  ${CYAN}• 虚拟环境名称: $(basename "$VIRTUAL_ENV")${NC}"
+    else
+        print_message $YELLOW "⚠️ 未使用虚拟环境"
+        echo -e "  ${YELLOW}• 当前使用系统Python${NC}"
+    fi
+    
+    # 检查是否有虚拟环境目录
+    if [ -d "venv" ]; then
         echo
-        if [ -n "$VIRTUAL_ENV" ]; then
-            print_message $GREEN "✅ 正在使用虚拟环境"
-            echo -e "  ${CYAN}• 虚拟环境路径: $VIRTUAL_ENV${NC}"
-            echo -e "  ${CYAN}• 虚拟环境名称: $(basename "$VIRTUAL_ENV")${NC}"
-        else
-            print_message $YELLOW "⚠️ 未使用虚拟环境"
-            echo -e "  ${YELLOW}• 当前使用系统Python${NC}"
-        fi
-        
-        # 检查是否有虚拟环境目录
-        if [ -d "venv" ]; then
-            echo
-            print_message $CYAN "发现本地虚拟环境目录: venv/"
-            read -p "是否激活本地虚拟环境? (y/N): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                print_message $BLUE "🔄 激活虚拟环境..."
-                source venv/bin/activate
-                print_message $GREEN "✅ 虚拟环境已激活"
-                print_message $CYAN "请重新运行脚本以使用虚拟环境"
+        print_message $CYAN "发现本地虚拟环境目录: venv/"
+        read -p "是否激活本地虚拟环境? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $BLUE "🔄 激活虚拟环境..."
+            source venv/bin/activate
+            print_message $GREEN "✅ 虚拟环境已激活"
+            print_message $CYAN "请重新运行脚本以使用虚拟环境"
                 read -p "按任意键返回..." -n 1 -r
                 echo
-                return
-            fi
+            return
         fi
-        
-        echo
-        print_message $CYAN "虚拟环境选项:"
-        echo -e "${CYAN}[1] 创建新的虚拟环境${NC}"
-        echo -e "${CYAN}[2] 删除现有虚拟环境${NC}"
-        echo -e "${CYAN}[3] 重新创建虚拟环境${NC}"
+    fi
+    
+    echo
+    print_message $CYAN "虚拟环境选项:"
+    echo -e "${CYAN}[1] 创建新的虚拟环境${NC}"
+    echo -e "${CYAN}[2] 删除现有虚拟环境${NC}"
+    echo -e "${CYAN}[3] 重新创建虚拟环境${NC}"
         echo -e "${CYAN}[0] 返回主菜单${NC}"
-        echo
-        
-        read -p "请选择 [0-3]: " venv_choice
+    echo
+    
+    read -p "请选择 [0-3]: " venv_choice
     
     case $venv_choice in
         1)
@@ -2113,10 +2113,10 @@ uninstall_bot() {
             read -p "确认完整卸载？(yes/no): " confirm
             
             if [ "$confirm" != "yes" ] && [ "$confirm" != "YES" ] && [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-                print_message $YELLOW "❌ 取消卸载操作"
-                return
-            fi
-            
+        print_message $YELLOW "❌ 取消卸载操作"
+        return
+    fi
+    
             # 先卸载Python依赖
             uninstall_dependencies
             echo
@@ -2270,10 +2270,10 @@ uninstall_project_files() {
     print_message $YELLOW "🔄 删除全局命令..."
     local command_paths=("/usr/local/bin/fn-bot" "$HOME/.local/bin/fn-bot")
     for command_path in "${command_paths[@]}"; do
-        if [ -f "$command_path" ]; then
-            if [ -w "$command_path" ]; then
-                rm -f "$command_path"
-            else
+    if [ -f "$command_path" ]; then
+        if [ -w "$command_path" ]; then
+            rm -f "$command_path"
+        else
                 sudo rm -f "$command_path" 2>/dev/null || true
             fi
             print_message $GREEN "✅ 已删除: $command_path"
@@ -3170,42 +3170,42 @@ show_system_status() {
 # 日志管理功能
 manage_logs() {
     while true; do
-        print_message $BLUE "📋 日志管理..."
-        
-        if [ ! -f "$LOG_FILE" ]; then
-            print_message $YELLOW "⚠️ 日志文件不存在"
+    print_message $BLUE "📋 日志管理..."
+    
+    if [ ! -f "$LOG_FILE" ]; then
+        print_message $YELLOW "⚠️ 日志文件不存在"
             read -p "按任意键返回主菜单..." -n 1 -r
             echo
-            return
-        fi
-        
-        # 获取日志文件信息
-        local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
-        local log_lines=$(wc -l < "$LOG_FILE" 2>/dev/null | echo "0")
-        local last_modified=$(stat -c %y "$LOG_FILE" 2>/dev/null | cut -d' ' -f1,2 || echo "未知")
-        
-        echo
-        print_message $CYAN "日志文件信息:"
-        echo -e "  ${CYAN}• 文件路径: $LOG_FILE${NC}"
-        echo -e "  ${CYAN}• 文件大小: $log_size${NC}"
-        echo -e "  ${CYAN}• 行数: $log_lines${NC}"
-        echo -e "  ${CYAN}• 最后修改: $last_modified${NC}"
-        echo
-        
-        print_message $CYAN "日志管理选项:"
-        echo -e "${CYAN}[1] 查看实时日志${NC}"
-        echo -e "${CYAN}[2] 查看最后50行${NC}"
-        echo -e "${CYAN}[3] 查看最后100行${NC}"
-        echo -e "${CYAN}[4] 查看全部日志${NC}"
-        echo -e "${CYAN}[5] 搜索错误日志${NC}"
-        echo -e "${CYAN}[6] 搜索警告日志${NC}"
-        echo -e "${CYAN}[7] 搜索特定关键词${NC}"
-        echo -e "${CYAN}[8] 清空日志文件${NC}"
-        echo -e "${CYAN}[9] 压缩日志文件${NC}"
+        return
+    fi
+    
+    # 获取日志文件信息
+    local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
+    local log_lines=$(wc -l < "$LOG_FILE" 2>/dev/null | echo "0")
+    local last_modified=$(stat -c %y "$LOG_FILE" 2>/dev/null | cut -d' ' -f1,2 || echo "未知")
+    
+    echo
+    print_message $CYAN "日志文件信息:"
+    echo -e "  ${CYAN}• 文件路径: $LOG_FILE${NC}"
+    echo -e "  ${CYAN}• 文件大小: $log_size${NC}"
+    echo -e "  ${CYAN}• 行数: $log_lines${NC}"
+    echo -e "  ${CYAN}• 最后修改: $last_modified${NC}"
+    echo
+    
+    print_message $CYAN "日志管理选项:"
+    echo -e "${CYAN}[1] 查看实时日志${NC}"
+    echo -e "${CYAN}[2] 查看最后50行${NC}"
+    echo -e "${CYAN}[3] 查看最后100行${NC}"
+    echo -e "${CYAN}[4] 查看全部日志${NC}"
+    echo -e "${CYAN}[5] 搜索错误日志${NC}"
+    echo -e "${CYAN}[6] 搜索警告日志${NC}"
+    echo -e "${CYAN}[7] 搜索特定关键词${NC}"
+    echo -e "${CYAN}[8] 清空日志文件${NC}"
+    echo -e "${CYAN}[9] 压缩日志文件${NC}"
         echo -e "${CYAN}[0] 返回主菜单${NC}"
-        echo
-        
-        read -p "请选择 [0-9]: " log_choice
+    echo
+    
+    read -p "请选择 [0-9]: " log_choice
     
     case $log_choice in
         1)
@@ -3737,11 +3737,11 @@ main() {
             ;;
         1)
             print_message $YELLOW "⚠️ 检测到大量缺失依赖，正在安装..."
-            install_dependencies
-            if [ $? -ne 0 ]; then
-                print_message $RED "❌ 依赖安装失败"
-                exit 1
-            fi
+        install_dependencies
+        if [ $? -ne 0 ]; then
+            print_message $RED "❌ 依赖安装失败"
+            exit 1
+        fi
             ;;
         2)
             print_message $BLUE "🔍 检测到少量缺失依赖，正在精确安装..."

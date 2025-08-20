@@ -1843,5 +1843,337 @@ main() {
     show_management_menu
 }
 
-# 执行主流程
-main
+# ==========================================
+# 自动更新功能
+# ==========================================
+
+# 自动更新项目
+auto_update_project() {
+    print_message $BLUE "🔄 开始自动更新 FinalUnlock..."
+    echo
+    
+    # 检查是否是Git仓库
+    local project_dir="/usr/local/FinalUnlock"
+    if [ ! -d "$project_dir" ]; then
+        print_message $RED "❌ 项目目录不存在: $project_dir"
+        print_message $YELLOW "💡 请先安装项目后再执行更新"
+        return 1
+    fi
+    
+    cd "$project_dir" || {
+        print_message $RED "❌ 无法进入项目目录"
+        return 1
+    }
+    
+    # 备份配置文件
+    print_message $CYAN "📁 备份配置文件..."
+    local backup_dir="/tmp/finalunlock_backup_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    # 备份重要配置文件
+    local config_files=(".env" "users.json" "blacklist.txt" "bot.log")
+    for file in "${config_files[@]}"; do
+        if [ -f "$file" ]; then
+            cp "$file" "$backup_dir/" 2>/dev/null
+            print_message $GREEN "✅ 已备份: $file"
+        fi
+    done
+    
+    # 检查Git状态
+    if [ ! -d ".git" ]; then
+        print_message $YELLOW "⚠️ 不是Git仓库，执行重新下载..."
+        
+        # 重新下载项目
+        cd ..
+        local temp_dir="FinalUnlock_temp_$(date +%Y%m%d_%H%M%S)"
+        
+        if git clone https://github.com/xymn2023/FinalUnlock.git "$temp_dir"; then
+            print_message $GREEN "✅ 下载新版本成功"
+            
+            # 停止服务
+            print_message $CYAN "🛑 停止现有服务..."
+            if [ -f "$project_dir/bot.pid" ]; then
+                local pid=$(cat "$project_dir/bot.pid")
+                if ps -p "$pid" > /dev/null 2>&1; then
+                    kill "$pid" 2>/dev/null
+                    sleep 2
+                fi
+            fi
+            
+            # 替换文件（除了配置文件）
+            print_message $CYAN "🔄 更新文件..."
+            
+            # 复制新文件，排除配置文件
+            find "$temp_dir" -type f -name ".*" -prune -o -type f ! -name ".env" ! -name "users.json" ! -name "blacklist.txt" ! -name "*.log" -print0 | \
+            while IFS= read -r -d '' file; do
+                relative_path="${file#$temp_dir/}"
+                cp "$file" "$project_dir/$relative_path" 2>/dev/null
+            done
+            
+            # 清理临时目录
+            rm -rf "$temp_dir"
+        else
+            print_message $RED "❌ 下载失败"
+            return 1
+        fi
+    else
+        # Git仓库更新
+        print_message $CYAN "🔄 检查远程更新..."
+        
+        # 获取远程更新
+        if git fetch origin main; then
+            print_message $GREEN "✅ 获取远程更新成功"
+            
+            # 检查是否有更新
+            local local_commit=$(git rev-parse HEAD)
+            local remote_commit=$(git rev-parse origin/main)
+            
+            if [ "$local_commit" = "$remote_commit" ]; then
+                print_message $CYAN "ℹ️ 已是最新版本，无需更新"
+                return 0
+            fi
+            
+            print_message $CYAN "📦 发现新版本，开始更新..."
+            
+            # 停止服务
+            print_message $CYAN "🛑 停止现有服务..."
+            if [ -f "bot.pid" ]; then
+                local pid=$(cat "bot.pid")
+                if ps -p "$pid" > /dev/null 2>&1; then
+                    kill "$pid" 2>/dev/null
+                    sleep 2
+                fi
+            fi
+            
+            # 执行Git更新，但保护配置文件
+            git stash push --include-untracked -m "Auto backup before update"
+            git reset --hard origin/main
+            
+        else
+            print_message $RED "❌ 获取远程更新失败"
+            return 1
+        fi
+    fi
+    
+    # 恢复配置文件
+    print_message $CYAN "📁 恢复配置文件..."
+    for file in "${config_files[@]}"; do
+        if [ -f "$backup_dir/$file" ]; then
+            cp "$backup_dir/$file" "$project_dir/" 2>/dev/null
+            print_message $GREEN "✅ 已恢复: $file"
+        fi
+    done
+    
+    # 设置权限
+    chmod +x *.sh 2>/dev/null
+    
+    # 更新依赖
+    print_message $CYAN "📦 更新Python依赖..."
+    if [ -f "requirements.txt" ]; then
+        # 激活虚拟环境
+        if [ -d "venv" ]; then
+            source venv/bin/activate
+            pip install --upgrade -r requirements.txt --quiet
+            print_message $GREEN "✅ 依赖更新完成"
+        else
+            print_message $YELLOW "⚠️ 虚拟环境不存在，跳过依赖更新"
+        fi
+    fi
+    
+    # 重启服务
+    print_message $CYAN "🚀 重启服务..."
+    if [ -f "start.sh" ]; then
+        # 重新启动机器人
+        nohup python bot.py > bot.log 2>&1 &
+        echo $! > bot.pid
+        sleep 2
+        
+        if ps -p $(cat bot.pid) > /dev/null 2>&1; then
+            print_message $GREEN "✅ 机器人重启成功"
+        else
+            print_message $RED "❌ 机器人重启失败"
+        fi
+    fi
+    
+    # 清理备份文件（保留最近3个）
+    find /tmp -maxdepth 1 -name "finalunlock_backup_*" -type d -mtime +2 -exec rm -rf {} \; 2>/dev/null
+    
+    print_message $GREEN "🎉 更新完成！"
+    print_message $CYAN "💡 配置文件已保护，无需重新配置"
+    echo
+    
+    # 显示版本信息
+    if [ -f "README.md" ]; then
+        local version=$(grep -o "v[0-9]\+\.[0-9]\+\.[0-9]\+" README.md | head -1)
+        if [ -n "$version" ]; then
+            print_message $PURPLE "📋 当前版本: $version"
+        fi
+    fi
+    
+    return 0
+}
+
+# 主菜单
+show_main_menu() {
+    while true; do
+        clear
+        show_header
+        print_message $PURPLE "🎯 FinalUnlock 管理菜单"
+        echo
+        print_message $GREEN "[1] 一键安装/重装 FinalUnlock"
+        print_message $BLUE "[2] 自动更新 FinalUnlock"
+        print_message $CYAN "[3] 自动系统修复"
+        print_message $RED "[4] 移除/卸载 FinalUnlock"
+        print_message $YELLOW "[0] 退出程序"
+        echo
+        echo -e "${GRAY}---${NC}"
+        echo -ne "${YELLOW}请输入选择 [0-4]: ${NC}"
+        read -r choice
+        
+        case $choice in
+            1)
+                print_message $BLUE "🚀 开始安装..."
+                main_install
+                ;;
+            2)
+                auto_update_project
+                print_message $CYAN "按任意键继续..."
+                read -n 1
+                ;;
+            3)
+                auto_system_fix
+                print_message $CYAN "按任意键继续..."
+                read -n 1
+                ;;
+            4)
+                uninstall_project
+                ;;
+            0|q|Q)
+                print_message $GREEN "👋 感谢使用 FinalUnlock！"
+                exit 0
+                ;;
+            *)
+                print_message $RED "❌ 无效选择，请重新输入"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# 卸载项目
+uninstall_project() {
+    print_message $RED "🗑️ 开始卸载 FinalUnlock..."
+    echo
+    
+    # 确认操作
+    echo -ne "${YELLOW}⚠️ 确定要卸载 FinalUnlock 吗？这将删除所有文件和配置！[yes/no]: ${NC}"
+    read -r confirm
+    
+    if [ "$confirm" != "yes" ]; then
+        print_message $CYAN "ℹ️ 取消卸载操作"
+        return 0
+    fi
+    
+    local project_dir="/usr/local/FinalUnlock"
+    
+    # 停止服务
+    print_message $CYAN "🛑 停止服务..."
+    if [ -f "$project_dir/bot.pid" ]; then
+        local pid=$(cat "$project_dir/bot.pid")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            kill "$pid" 2>/dev/null
+            print_message $GREEN "✅ 机器人服务已停止"
+        fi
+    fi
+    
+    # 停止系统服务
+    if systemctl is-active --quiet finalunlock-bot 2>/dev/null; then
+        sudo systemctl stop finalunlock-bot 2>/dev/null
+        sudo systemctl disable finalunlock-bot 2>/dev/null
+        print_message $GREEN "✅ 系统服务已停止"
+    fi
+    
+    # 删除系统服务文件
+    if [ -f "/etc/systemd/system/finalunlock-bot.service" ]; then
+        sudo rm -f "/etc/systemd/system/finalunlock-bot.service"
+        sudo systemctl daemon-reload
+        print_message $GREEN "✅ 系统服务文件已删除"
+    fi
+    
+    # 删除全局命令
+    if [ -f "/usr/local/bin/fn-bot" ]; then
+        sudo rm -f "/usr/local/bin/fn-bot"
+        print_message $GREEN "✅ 全局命令已删除"
+    fi
+    
+    # 删除项目目录
+    if [ -d "$project_dir" ]; then
+        sudo rm -rf "$project_dir"
+        print_message $GREEN "✅ 项目文件已删除"
+    fi
+    
+    # 清理备份文件
+    find /tmp -maxdepth 1 -name "finalunlock_backup_*" -type d -exec rm -rf {} \; 2>/dev/null
+    print_message $GREEN "✅ 备份文件已清理"
+    
+    print_message $GREEN "🎉 卸载完成！"
+    print_message $CYAN "💡 感谢使用 FinalUnlock"
+    echo
+    
+    exit 0
+}
+
+# 重命名原来的main函数为main_install
+main_install() {
+    # 第一步：系统检查
+    system_check
+    
+    # 第二步：环境准备
+    silent_install_dependencies
+    
+    # 新增：详细系统诊断
+    if ! detailed_system_check; then
+        print_message $RED "❌ 系统诊断发现问题，请解决后重试"
+        exit 1
+    fi
+    
+    # 第三步：下载并安装
+    download_and_install
+    
+    # 第四步：用户配置
+    collect_user_configuration
+    
+    # 🆕 第五步：自动启动机器人 (先启动bot)
+    if auto_start_bot; then
+        print_message $GREEN "✅ 机器人启动成功"
+    else
+        print_message $RED "❌ 机器人启动失败，停止安装"
+        print_message $YELLOW "💡 请检查配置后重新运行安装程序"
+        exit 1
+    fi
+    
+    # 🆕 第六步：设置开机自启
+    if setup_autostart; then
+        print_message $GREEN "✅ 开机自启设置成功"
+    else
+        print_message $YELLOW "⚠️ 开机自启设置失败，但不影响正常使用"
+    fi
+    
+    # 🆕 第七步：启动Guard服务 (在bot启动后)
+    start_services
+    
+    # 第八步：显示完成
+    show_completion
+    
+    # 🆕 第九步：自动系统修复和验证
+    auto_system_fix
+    
+    # 🆕 第十步：最终验证和修复
+    final_verification_and_fix
+    
+    # 🆕 第十一步：显示管理菜单（不自动退出）
+    show_management_menu
+}
+
+# 执行主菜单
+show_main_menu
