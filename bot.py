@@ -631,14 +631,9 @@ def cleanup_existing_instances():
                     
                 cmdline = ' '.join(proc.info['cmdline'] or [])
                 if 'bot.py' in cmdline and current_script in cmdline:
-                    logger.warning(f"发现其他bot实例 (PID: {proc.info['pid']})，正在终止...")
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                        logger.info(f"已终止重复实例 (PID: {proc.info['pid']})")
-                    except psutil.TimeoutExpired:
-                        proc.kill()
-                        logger.info(f"强制终止重复实例 (PID: {proc.info['pid']})")
+                    logger.warning(f"发现其他bot实例 (PID: {proc.info['pid']})，正在强制终止...")
+                    proc.kill()  # 直接使用kill()强制终止
+                    logger.info(f"已强制终止重复实例 (PID: {proc.info['pid']})")
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
@@ -700,8 +695,8 @@ def cleanup_existing_instances():
                 for pid in pids:
                     if pid.strip() and pid.strip() != current_pid:
                         try:
-                            os.kill(int(pid), signal.SIGTERM)
-                            logger.info(f"已终止进程 PID: {pid}")
+                            os.kill(int(pid), signal.SIGKILL)  # 使用SIGKILL强制终止
+                            logger.info(f"已强制终止进程 PID: {pid}")
                         except (ProcessLookupError, PermissionError, ValueError):
                             pass
                             
@@ -755,12 +750,37 @@ if __name__ == '__main__':
         print('Bot 运行中...')
         
         # 🔧 修复：使用兼容v20.0+的参数，增加冲突处理
-        app.run_polling(
-            drop_pending_updates=True,
-            timeout=30,
-            bootstrap_retries=3,
-            close_loop=False  # 避免事件循环冲突
-        )
+        try:
+            app.run_polling(
+                drop_pending_updates=True,
+                timeout=30,
+                bootstrap_retries=3,
+                close_loop=False  # 避免事件循环冲突
+            )
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "terminated by other getupdates" in error_msg or "conflict" in error_msg:
+                logger.warning("检测到多实例冲突，尝试自动修复...")
+                
+                # 等待一下让其他实例退出
+                import time
+                time.sleep(5)
+                
+                # 尝试再次清理
+                cleanup_existing_instances()
+                
+                # 再次尝试启动
+                logger.info("重新尝试启动机器人...")
+                time.sleep(2)
+                
+                app.run_polling(
+                    drop_pending_updates=True,
+                    timeout=30,
+                    bootstrap_retries=3,
+                    close_loop=False
+                )
+            else:
+                raise  # 如果不是冲突错误，重新抛出异常
         
     except KeyboardInterrupt:
         logger.info("收到键盘中断，正在关闭...")

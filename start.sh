@@ -8,6 +8,409 @@
 # 屏蔽 Ctrl+C 信号
 trap '' SIGINT SIGTERM
 
+# 自动清理bot实例函数（无需确认）
+execute_auto_cleanup() {
+    print_message $BLUE "🔥 开始自动清理bot实例..."
+    echo
+    
+    # 使用自动清理脚本
+    if [ -f "fix_conflict.sh" ]; then
+        print_message $CYAN "使用专用自动清理脚本..."
+        bash fix_conflict.sh
+    else
+        print_message $YELLOW "⚠️ 自动清理脚本不存在，使用内置清理逻辑..."
+        internal_cleanup_logic
+    fi
+    
+    echo
+    print_message $BLUE "💡 自动清理完成，现在可以安全启动机器人了"
+    print_message $CYAN "建议使用选项 [1] 启动机器人"
+}
+
+# 手动清理bot实例函数（需要确认）
+execute_manual_cleanup() {
+    print_message $BLUE "📋 开始手动清理bot实例..."
+    echo
+    
+    # 使用手动清理脚本
+    if [ -f "fix_conflict_manual.sh" ]; then
+        print_message $CYAN "使用专用手动清理脚本..."
+        bash fix_conflict_manual.sh
+    else
+        print_message $YELLOW "⚠️ 手动清理脚本不存在，使用内置清理逻辑..."
+        internal_cleanup_logic
+    fi
+    
+    echo
+    print_message $BLUE "💡 手动清理完成，现在可以安全启动机器人了"
+    print_message $CYAN "建议使用选项 [1] 启动机器人"
+}
+
+# 内置清理逻辑（共用）
+internal_cleanup_logic() {
+    print_message $YELLOW "🔍 扫描所有bot进程..."
+    
+    # 获取当前脚本PID
+    local current_pid=$$
+    
+    # 查找所有相关进程
+    local all_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    local finalunlock_pids=$(pgrep -f "FinalUnlock" 2>/dev/null || true)
+    local combined_pids="$all_pids $finalunlock_pids"
+    
+    # 去重
+    local unique_pids=$(echo "$combined_pids" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+$' || true)
+    
+    if [ -z "$unique_pids" ]; then
+        print_message $GREEN "✅ 未发现运行中的bot进程"
+        return 0
+    fi
+    
+    print_message $YELLOW "🎯 发现以下进程："
+    echo "$unique_pids" | while read -r pid; do
+        if [ -n "$pid" ] && [ "$pid" != "$current_pid" ]; then
+            local process_info=$(ps -p $pid -o pid,cmd --no-headers 2>/dev/null || echo "$pid [进程信息获取失败]")
+            print_message $CYAN "   $process_info"
+        fi
+    done
+    
+    echo
+    print_message $BLUE "💥 发送KILL -9信号强制终止..."
+    echo "$unique_pids" | while read -r pid; do
+        if [ -n "$pid" ] && [ "$pid" != "$current_pid" ]; then
+            kill -9 $pid 2>/dev/null || true
+        fi
+    done
+    
+    sleep 1
+    
+    # 清理PID文件
+    print_message $BLUE "🧹 清理相关文件..."
+    find . -name "*.pid" -delete 2>/dev/null || true
+    
+    # 清理systemd服务
+    if systemctl is-active finalunlock 2>/dev/null | grep -q "active"; then
+        print_message $BLUE "🔧 停止systemd服务..."
+        systemctl stop finalunlock 2>/dev/null || true
+    fi
+    
+    print_message $GREEN "✅ 清理完成"
+}
+
+# 启动前自动清理函数（静默模式）
+auto_cleanup_before_start() {
+    # 静默检查并清理冲突进程，不显示详细信息
+    local current_pid=$$
+    local all_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    local finalunlock_pids=$(pgrep -f "FinalUnlock" 2>/dev/null || true)
+    local combined_pids="$all_pids $finalunlock_pids"
+    local unique_pids=$(echo "$combined_pids" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+$' || true)
+    
+    # 过滤掉当前脚本的PID
+    local filtered_pids=""
+    for pid in $unique_pids; do
+        if [ -n "$pid" ] && [ "$pid" != "$current_pid" ]; then
+            filtered_pids="$filtered_pids $pid"
+        fi
+    done
+    
+    if [ -n "$filtered_pids" ]; then
+        print_message $YELLOW "⚠️ 检测到 $(echo $filtered_pids | wc -w) 个冲突进程，正在自动清理..."
+        
+        # 直接使用kill -9强制清理，不等待
+        for pid in $filtered_pids; do
+            kill -9 $pid 2>/dev/null || true
+        done
+        
+        # 清理PID文件
+        find . -name "*.pid" -delete 2>/dev/null || true
+        
+        print_message $GREEN "✅ 冲突进程已清理"
+    else
+        print_message $GREEN "✅ 未发现冲突进程"
+    fi
+}
+
+# 启动或重启机器人函数
+start_or_restart_bot() {
+    # 检查虚拟环境
+    local venv_dir="$PROJECT_DIR/venv"
+    if [ -d "$venv_dir" ]; then
+        source "$venv_dir/bin/activate"
+        # 验证并设置正确的Python命令
+        if [ -x "$venv_dir/bin/python" ]; then
+            PYTHON_CMD="$venv_dir/bin/python"
+        elif [ -x "$venv_dir/bin/python3" ]; then
+            PYTHON_CMD="$venv_dir/bin/python3"
+        elif command -v python &> /dev/null; then
+            PYTHON_CMD="python"
+        else
+            PYTHON_CMD="python3"
+        fi
+    fi
+    
+    # 创建日志目录（如果不存在）
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # 启动前最后检查是否有冲突进程
+    local conflicting_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$conflicting_pids" ]; then
+        print_message $YELLOW "⚠️ 启动前发现冲突进程，正在清理..."
+        echo "$conflicting_pids" | while read -r cpid; do
+            if [ -n "$cpid" ]; then
+                kill -9 $cpid 2>/dev/null || true
+            fi
+        done
+        sleep 1
+    fi
+    
+    # 启动机器人
+    print_message $CYAN "💡 日志将实时记录到: $LOG_FILE"
+    nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    
+    # 保存PID
+    echo $pid > "$PID_FILE"
+    
+    # 等待一下检查是否启动成功
+    sleep 3
+    if ps -p $pid > /dev/null 2>&1; then
+        print_message $GREEN "✅ 机器人启动成功 (PID: $pid)"
+        print_message $CYAN "💡 机器人已在后台运行，即使退出脚本也会继续运行"
+        print_message $CYAN "💡 使用 'fn-bot' 命令可以随时管理机器人"
+        print_message $CYAN "📋 实时日志文件: $LOG_FILE"
+        
+        # 显示启动日志
+        echo
+        print_message $BLUE "📋 最新启动日志："
+        tail -n 5 "$LOG_FILE" 2>/dev/null || echo "日志文件暂时为空"
+        return 0
+    else
+        print_message $RED "❌ 机器人启动失败"
+        print_message $YELLOW "💡 可能原因："
+        print_message $CYAN "   • Bot Token 或 Chat ID 配置错误"
+        print_message $CYAN "   • 网络连接问题"
+        print_message $CYAN "   • Python依赖包缺失"
+        
+        echo
+        print_message $BLUE "📋 错误日志："
+        tail -n 10 "$LOG_FILE" 2>/dev/null || echo "无法读取日志文件"
+        
+        # 启动失败时的二次尝试（自动清理后重试）
+        echo
+        print_message $YELLOW "🔄 即将进行二次启动尝试..."
+        print_message $CYAN "正在执行更彻底的清理..."
+        sleep 2
+        
+        # 执行更彻底的清理
+        execute_thorough_cleanup
+        
+        print_message $BLUE "🔄 二次启动尝试..."
+        nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
+        local retry_pid=$!
+        echo $retry_pid > "$PID_FILE"
+        
+        sleep 3
+        if ps -p $retry_pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ 二次启动成功 (PID: $retry_pid)"
+            return 0
+        else
+            print_message $RED "❌ 二次启动也失败"
+            print_message $YELLOW "💡 建议检查配置或查看详细日志"
+            rm -f "$PID_FILE"
+            return 1
+        fi
+    fi
+}
+
+# 彻底清理函数（用于二次启动前）
+execute_thorough_cleanup() {
+    print_message $BLUE "🔥 执行彻底清理..."
+    
+    # 停止所有可能的服务
+    if systemctl is-active finalunlock 2>/dev/null | grep -q "active"; then
+        systemctl stop finalunlock 2>/dev/null || true
+    fi
+    
+    # 查找并终止所有相关进程
+    local all_processes=$(ps aux | grep -E "(python.*bot\.py|FinalUnlock)" | grep -v grep | awk '{print $2}' || true)
+    
+    if [ -n "$all_processes" ]; then
+        echo "$all_processes" | while read -r pid; do
+            if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # 清理所有PID和锁文件
+    find . -name "*.pid" -delete 2>/dev/null || true
+    find . -name "*.lock" -delete 2>/dev/null || true
+    find /tmp -name "*finalunlock*" -delete 2>/dev/null || true
+    
+    # 清理可能的套接字文件
+    find /tmp -name "*bot*" -type s -delete 2>/dev/null || true
+    
+    sleep 2
+    print_message $GREEN "✅ 彻底清理完成"
+}
+
+# 停止机器人并自动清理函数
+stop_bot_with_cleanup() {
+    print_message $BLUE "🛑 正在停止机器人并清理相关进程..."
+    
+    # 方法1：通过PID文件停止
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            if ps -p $pid > /dev/null 2>&1; then
+                print_message $CYAN "发现运行中的机器人 (PID: $pid)，正在强制停止..."
+                kill -9 $pid 2>/dev/null || true
+            fi
+        fi
+        rm -f "$PID_FILE"
+    fi
+    
+    # 方法2：停止所有bot.py进程（自动清理冲突进程）
+    local bot_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$bot_pids" ]; then
+        print_message $CYAN "发现其他bot进程，正在清理..."
+        echo "$bot_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $CYAN "   强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # 方法3：停止systemd服务
+    if systemctl is-active finalunlock 2>/dev/null | grep -q "active"; then
+        print_message $CYAN "停止systemd服务..."
+        systemctl stop finalunlock 2>/dev/null || true
+    fi
+    
+    # 清理相关文件
+    print_message $CYAN "清理相关文件..."
+    find . -name "*.pid" -delete 2>/dev/null || true
+    find . -name "*.lock" -delete 2>/dev/null || true
+    
+    # 最终验证
+    local remaining_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -z "$remaining_pids" ]; then
+        print_message $GREEN "✅ 机器人已完全停止"
+    else
+        print_message $YELLOW "⚠️ 仍有残留进程："
+        echo "$remaining_pids" | while read -r pid; do
+            if ps -p $pid > /dev/null 2>&1; then
+                local cmd=$(ps -p $pid -o cmd --no-headers 2>/dev/null)
+                print_message $CYAN "   PID $pid: $cmd"
+            fi
+        done
+        print_message $YELLOW "💡 建议运行强力清理：选择菜单选项 [k] 或 [K]"
+    fi
+}
+
+# 卸载机器人并清理所有相关进程函数
+uninstall_bot_with_cleanup() {
+    print_message $RED "🗑️ 开始卸载机器人并清理所有相关进程..."
+    echo
+    
+    # 首先停止所有相关进程（最彻底的清理）
+    print_message $BLUE "🛑 第一步：停止所有运行中的进程..."
+    
+    # 停止主进程
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+            print_message $CYAN "强制停止主进程 (PID: $pid)..."
+            kill -9 $pid 2>/dev/null || true
+        fi
+    fi
+    
+    # 查找并停止所有相关进程
+    local all_pids=$(ps aux | grep -E "(python.*bot\.py|FinalUnlock)" | grep -v grep | awk '{print $2}' || true)
+    if [ -n "$all_pids" ]; then
+        print_message $CYAN "发现相关进程，正在清理..."
+        echo "$all_pids" | while read -r pid; do
+            if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
+                print_message $CYAN "   强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # 停止系统服务
+    if systemctl is-active finalunlock 2>/dev/null | grep -q "active"; then
+        print_message $CYAN "停止systemd服务..."
+        systemctl stop finalunlock 2>/dev/null || true
+        systemctl disable finalunlock 2>/dev/null || true
+    fi
+    
+    # 清理服务文件
+    if [ -f "/etc/systemd/system/finalunlock.service" ]; then
+        print_message $CYAN "删除systemd服务文件..."
+        sudo rm -f /etc/systemd/system/finalunlock.service 2>/dev/null || true
+        sudo systemctl daemon-reload 2>/dev/null || true
+    fi
+    
+    print_message $GREEN "✅ 所有进程已停止"
+    
+    # 第二步：清理文件和目录
+    print_message $BLUE "🧹 第二步：清理文件和目录..."
+    
+    # 清理PID和锁文件
+    find . -name "*.pid" -delete 2>/dev/null || true
+    find . -name "*.lock" -delete 2>/dev/null || true
+    find /tmp -name "*finalunlock*" -delete 2>/dev/null || true
+    find /tmp -name "*bot*" -type s -delete 2>/dev/null || true
+    
+    # 清理日志文件
+    if [ -f "$LOG_FILE" ]; then
+        print_message $CYAN "清理日志文件..."
+        rm -f "$LOG_FILE" 2>/dev/null || true
+    fi
+    
+    # 清理配置文件
+    if [ -f "$ENV_FILE" ]; then
+        read -p "是否删除配置文件 (.env)? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -f "$ENV_FILE"
+            print_message $CYAN "✅ 配置文件已删除"
+        else
+            print_message $YELLOW "⚠️ 保留配置文件"
+        fi
+    fi
+    
+    # 第三步：询问是否删除项目文件
+    echo
+    print_message $YELLOW "⚠️ 是否删除整个项目目录?"
+    print_message $RED "警告：这将删除所有项目文件，包括脚本和虚拟环境"
+    read -p "确认删除项目目录? (输入 'DELETE' 确认): " confirm
+    
+    if [ "$confirm" = "DELETE" ]; then
+        print_message $RED "🗑️ 删除项目目录..."
+        cd ..
+        rm -rf "$PROJECT_DIR"
+        print_message $GREEN "✅ 项目已完全卸载"
+        
+        # 清理全局命令
+        if command -v fn-bot &> /dev/null; then
+            print_message $CYAN "清理全局命令..."
+            sudo rm -f /usr/local/bin/fn-bot 2>/dev/null || true
+            sudo rm -f /usr/bin/fn-bot 2>/dev/null || true
+        fi
+        
+        print_message $BLUE "👋 FinalUnlock 已完全卸载"
+        exit 0
+    else
+        print_message $YELLOW "⚠️ 保留项目文件，仅清理了运行进程"
+        print_message $CYAN "💡 如需重新安装，可运行 ./start.sh"
+    fi
+    
+    print_message $GREEN "✅ 卸载和清理完成"
+}
+
 # 安全退出函数
 safe_exit() {
     print_message $YELLOW "🔄 正在安全退出..."
@@ -3584,6 +3987,10 @@ show_menu() {
     echo -e "${CYAN}[f] 修复配置${NC}"
     echo -e "${CYAN}[d] systemd服务管理${NC}"
     echo
+    echo -e "${BLUE}=== 🔥 故障排除 ===${NC}"
+    echo -e "${RED}[k] 🔥 自动清理bot实例 (立即清理)${NC}"
+    echo -e "${YELLOW}[K] 📋 手动清理bot实例 (需要确认)${NC}"
+    echo
     echo -e "${CYAN}[0] 退出${NC}"
     echo
     
@@ -4057,7 +4464,7 @@ main() {
     # 主菜单循环
     while true; do
         show_menu
-        read -p "请选择操作 [0-9qucgmsvrfd]: " choice
+        read -p "请选择操作 [0-9qucgmsvrfdk]: " choice
         
         case $choice in
             1)
@@ -4068,12 +4475,19 @@ main() {
                     read -p "按回车键继续..."
                     continue
                 fi
-                # 后台使用强制重启逻辑，但显示友好信息
+                # 启动/重启机器人前自动清理冲突进程
                 print_message $BLUE "🚀 启动/重启机器人..."
-                force_restart_bot
+                print_message $CYAN "正在检查并清理可能的冲突进程..."
+                
+                # 自动清理冲突进程（静默模式）
+                auto_cleanup_before_start
+                
+                # 启动机器人
+                start_or_restart_bot
                 ;;
             2)
-                stop_bot
+                print_message $BLUE "🛑 停止机器人..."
+                stop_bot_with_cleanup
                 ;;
             3)
                 manage_logs
@@ -4094,7 +4508,8 @@ main() {
                 check_venv
                 ;;
             9)
-                uninstall_bot
+                print_message $RED "🗑️ 完整卸载机器人..."
+                uninstall_bot_with_cleanup
                 ;;
             q|Q)
                 quick_diagnose_and_fix
@@ -4165,11 +4580,27 @@ main() {
             d|D)
                 manage_systemd_service
                 ;;
+            k)
+                print_message $RED "🔥 自动清理bot实例"
+                print_message $CYAN "正在执行自动清理，无需确认..."
+                execute_auto_cleanup
+                ;;
+            K)
+                print_message $YELLOW "📋 手动清理bot实例"
+                print_message $YELLOW "⚠️ 这将终止所有运行中的FinalUnlock机器人进程"
+                read -p "确认执行清理? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    execute_manual_cleanup
+                else
+                    print_message $YELLOW "❌ 取消清理操作"
+                fi
+                ;;
             0)
                 safe_exit
                 ;;
             *)
-                print_message $RED "❌ 无效选择，请输入 0-9、q、u、g、c、m、s、v、r、f 或 d"
+                print_message $RED "❌ 无效选择，请输入 0-9、q、u、g、c、m、s、v、r、f、d、k 或 K"
                 ;;
         esac
         
