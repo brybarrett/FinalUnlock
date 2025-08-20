@@ -587,7 +587,7 @@ class SystemGuard:
 ## 📞 联系信息
 
 - 🤖 获取最新报告: 发送 /guard 命令
-- ⏰ 自动报告时间: 每天 07:00 (Asia/Shanghai)
+- ⏰ 自动报告时间: 每天 00:00 自检后立即发送 (Asia/Shanghai)
 - 🔍 自检执行时间: 每天 00:00 (Asia/Shanghai)
 - 📋 报告生成时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Shanghai)
 
@@ -625,8 +625,7 @@ class SystemGuard:
 ✅ 开机自启功能已配置
 
 📋 自动化时间表:
-- 🕛 每天 00:00: 执行全面系统自检
-- 🕖 每天 07:00: 自动发送详细报告
+- 🕛 每天 00:00: 执行全面系统自检并立即发送详细报告
 - 🤖 随时可用: 发送 /guard 获取最新报告
 - 🚀 开机自启: 系统重启后自动运行
 
@@ -774,15 +773,30 @@ class SystemGuard:
         
         return result
     
+    def perform_daily_check_and_send_report(self) -> Dict[str, Any]:
+        """执行每日自检并立即发送报告"""
+        self.logger.info("开始执行每日自检并发送报告")
+        
+        # 执行自检
+        report = self.perform_daily_check()
+        
+        # 立即发送报告
+        self.logger.info("自检完成，立即发送报告...")
+        success = self.send_report_sync(report)
+        
+        if success:
+            self.logger.info("自检报告发送成功")
+        else:
+            self.logger.error("自检报告发送失败")
+        
+        return report
+    
     def schedule_tasks(self):
         """安排定时任务"""
-        # 每天0点执行自检
-        schedule.every().day.at("00:00").do(self.perform_daily_check)
+        # 每天0点执行自检并立即发送报告
+        schedule.every().day.at("00:00").do(self.perform_daily_check_and_send_report)
         
-        # 每天7点发送报告 - 使用同步方式
-        schedule.every().day.at("07:00").do(self.send_report_sync)
-        
-        self.logger.info("定时任务已安排: 0点自检，7点发送报告")
+        self.logger.info("定时任务已安排: 0点自检并立即发送报告")
     
     def run_daemon(self):
         """运行守护进程"""

@@ -120,7 +120,7 @@ start_guard() {
         print_message $GREEN "✅ Guard 守护进程启动成功 (PID: $pid)"
         print_message $CYAN "📋 日志文件: $GUARD_LOG_FILE"
         print_message $CYAN "⏰ 自检时间: 每天 00:00 (Asia/Shanghai)"
-        print_message $CYAN "📤 报告时间: 每天 08:00 (Asia/Shanghai)"
+        print_message $CYAN "📤 报告时间: 每天 00:00 自检后立即发送 (Asia/Shanghai)"
     else
         print_message $RED "❌ Guard 守护进程启动失败"
         rm -f "$GUARD_PID_FILE"

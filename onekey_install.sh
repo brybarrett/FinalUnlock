@@ -1178,8 +1178,7 @@ show_completion() {
     echo
     
     print_message $YELLOW "⏰ 自动功能:"
-    print_message $CYAN "  • 每天 00:00 - 系统自检"
-    print_message $CYAN "  • 每天 07:00 - 发送报告"
+    print_message $CYAN "  • 每天 00:00 - 系统自检并发送报告"
     print_message $CYAN "  • 随时可用 - /guard 获取报告"
     print_message $CYAN "  • 开机自启 - 系统重启后自动运行"
     echo
