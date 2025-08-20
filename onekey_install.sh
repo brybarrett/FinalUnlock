@@ -163,12 +163,28 @@ download_and_install() {
     chmod +x "$TEMP_DIR/install.sh"
     print_message $GREEN "✅ 最新安装脚本下载完成"
     
-    # 执行安装（静默模式）
+    # 执行安装（显示详细错误）
     print_message $YELLOW "🚀 执行项目安装..."
-    if "$TEMP_DIR/install.sh" > /dev/null 2>&1; then
+    print_message $CYAN "💡 如果出现错误，将显示详细信息"
+    
+    # 不再静默执行，显示错误信息
+    if "$TEMP_DIR/install.sh"; then
         print_message $GREEN "✅ 项目安装完成"
     else
-        print_message $RED "❌ 项目安装失败"
+        local exit_code=$?
+        print_message $RED "❌ 项目安装失败 (退出码: $exit_code)"
+        print_message $YELLOW "🔍 可能的原因:"
+        print_message $CYAN "  • install.sh脚本存在问题"
+        print_message $CYAN "  • 权限不足"
+        print_message $CYAN "  • 系统环境问题"
+        print_message $CYAN "  • 网络连接问题"
+        
+        print_message $BLUE "🛠️ 建议解决方案:"
+        print_message $CYAN "  1. 检查系统权限: sudo权限是否正常"
+        print_message $CYAN "  2. 手动执行: 下载install.sh手动运行查看错误"
+        print_message $CYAN "  3. 检查磁盘空间: df -h"
+        print_message $CYAN "  4. 检查网络: ping github.com"
+        
         rm -rf "$TEMP_DIR"
         exit 1
     fi
@@ -390,12 +406,67 @@ show_completion() {
 # 主执行流程
 # ==========================================
 
+# 添加详细的系统诊断函数
+detailed_system_check() {
+    print_message $BLUE "🔍 详细系统诊断..."
+    
+    # 检查磁盘空间
+    local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+    if [ "$disk_usage" -gt 90 ]; then
+        print_message $RED "❌ 磁盘空间不足: ${disk_usage}%"
+        return 1
+    else
+        print_message $GREEN "✅ 磁盘空间充足: ${disk_usage}%"
+    fi
+    
+    # 检查内存
+    local mem_usage=$(free | awk 'NR==2{printf "%.0f", $3*100/$2}')
+    if [ "$mem_usage" -gt 95 ]; then
+        print_message $YELLOW "⚠️ 内存使用率较高: ${mem_usage}%"
+    else
+        print_message $GREEN "✅ 内存使用正常: ${mem_usage}%"
+    fi
+    
+    # 检查sudo权限
+    if sudo -n true 2>/dev/null; then
+        print_message $GREEN "✅ sudo权限正常"
+    else
+        print_message $YELLOW "⚠️ 需要sudo权限，请确保当前用户有sudo权限"
+    fi
+    
+    # 检查Python环境
+    if python3 --version > /dev/null 2>&1; then
+        local py_version=$(python3 --version 2>&1)
+        print_message $GREEN "✅ Python环境: $py_version"
+    else
+        print_message $RED "❌ Python3未安装或不可用"
+        return 1
+    fi
+    
+    # 检查git
+    if git --version > /dev/null 2>&1; then
+        print_message $GREEN "✅ Git已安装"
+    else
+        print_message $RED "❌ Git未安装"
+        return 1
+    fi
+    
+    return 0
+}
+
+# 在main函数中调用详细检查
 main() {
     # 第一步：预检查和清理
     precheck_and_cleanup
     
     # 第二步：静默安装依赖
     silent_install_dependencies
+    
+    # 新增：详细系统诊断
+    if ! detailed_system_check; then
+        print_message $RED "❌ 系统诊断发现问题，请解决后重试"
+        exit 1
+    fi
     
     # 第三步：下载并安装
     download_and_install
@@ -412,3 +483,92 @@ main() {
 
 # 执行主流程
 main
+
+# 添加手动安装备选方案
+manual_installation_fallback() {
+    print_message $YELLOW "🔧 尝试手动安装备选方案..."
+    
+    # 直接克隆项目
+    local install_dir="/usr/local/FinalUnlock"
+    
+    print_message $BLUE "📥 直接克隆项目..."
+    if git clone https://github.com/xymn2023/FinalUnlock.git "$install_dir"; then
+        print_message $GREEN "✅ 项目克隆成功"
+    else
+        print_message $RED "❌ 项目克隆失败"
+        return 1
+    fi
+    
+    cd "$install_dir"
+    
+    # 创建虚拟环境
+    print_message $BLUE "🐍 创建虚拟环境..."
+    if python3 -m venv venv; then
+        print_message $GREEN "✅ 虚拟环境创建成功"
+    else
+        print_message $RED "❌ 虚拟环境创建失败"
+        return 1
+    fi
+    
+    # 激活虚拟环境并安装依赖
+    print_message $BLUE "📦 安装依赖..."
+    source venv/bin/activate
+    
+    if pip install --upgrade pip && pip install -r requirements.txt; then
+        print_message $GREEN "✅ 依赖安装成功"
+    else
+        print_message $RED "❌ 依赖安装失败"
+        return 1
+    fi
+    
+    # 创建全局命令
+    print_message $BLUE "🔧 创建全局命令..."
+    local start_script="#!/bin/bash\ncd \"$install_dir\"\nsource \"$install_dir/venv/bin/activate\"\n\"$install_dir/start.sh\" \"\$@\""
+    
+    echo -e "$start_script" | sudo tee /usr/local/bin/fn-bot > /dev/null
+    sudo chmod +x /usr/local/bin/fn-bot
+    
+    print_message $GREEN "✅ 手动安装完成"
+    return 0
+}
+
+# 修改execute_installation函数，添加备选方案
+execute_installation() {
+    print_message $BLUE "📥 第三步：下载最新版本并安装..."
+    
+    # 创建临时目录
+    TEMP_DIR=$(mktemp -d)
+    
+    # 下载最新的install.sh
+    print_message $YELLOW "🔄 下载最新安装脚本..."
+    if ! curl -s -L "https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/install.sh" -o "$TEMP_DIR/install.sh"; then
+        print_message $RED "❌ 下载失败"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    chmod +x "$TEMP_DIR/install.sh"
+    print_message $GREEN "✅ 最新安装脚本下载完成"
+    
+    # 执行安装
+    print_message $YELLOW "🚀 执行项目安装..."
+    
+    if "$TEMP_DIR/install.sh"; then
+        print_message $GREEN "✅ 项目安装完成"
+        rm -rf "$TEMP_DIR"
+    else
+        local exit_code=$?
+        print_message $RED "❌ 项目安装失败 (退出码: $exit_code)"
+        rm -rf "$TEMP_DIR"
+        
+        print_message $YELLOW "🔄 尝试备选安装方案..."
+        if manual_installation_fallback; then
+            print_message $GREEN "✅ 备选方案安装成功"
+        else
+            print_message $RED "❌ 所有安装方案都失败"
+            exit 1
+        fi
+    fi
+    
+    echo
+}
