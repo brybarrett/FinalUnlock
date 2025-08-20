@@ -570,20 +570,76 @@ auto_start_bot() {
     
     # 启动机器人
     print_message $YELLOW "🔄 启动机器人到后台..."
+    
+    # 先验证.env文件配置
+    if [ ! -f ".env" ]; then
+        print_message $RED "❌ .env 文件不存在，无法启动机器人"
+        print_message $YELLOW "💡 请先配置BOT_TOKEN和CHAT_ID"
+        return 1
+    fi
+    
+    # 检查.env文件内容
+    if ! grep -q "BOT_TOKEN=" .env || ! grep -q "CHAT_ID=" .env; then
+        print_message $RED "❌ .env 文件缺少必要配置"
+        print_message $YELLOW "💡 请确保.env文件包含BOT_TOKEN和CHAT_ID"
+        return 1
+    fi
+    
+    # 检查配置值是否为空
+    bot_token=$(grep "BOT_TOKEN=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
+    chat_id=$(grep "CHAT_ID=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
+    
+    if [ -z "$bot_token" ]; then
+        print_message $RED "❌ BOT_TOKEN 为空，请配置有效的机器人Token"
+        return 1
+    fi
+    
+    if [ -z "$chat_id" ]; then
+        print_message $RED "❌ CHAT_ID 为空，请配置有效的Chat ID"
+        return 1
+    fi
+    
+    print_message $GREEN "✅ 配置验证通过，启动机器人..."
+    
+    # 清理旧的日志和PID文件
+    rm -f bot.log bot.pid
+    
+    # 启动机器人
     nohup $python_cmd bot.py > bot.log 2>&1 &
     local bot_pid=$!
     
     echo $bot_pid > bot.pid
     
-    # 验证启动
-    sleep 3
+    # 验证启动 - 增加检查时间和详细诊断
+    print_message $YELLOW "🔄 等待机器人启动..."
+    sleep 5
+    
     if ps -p $bot_pid > /dev/null 2>&1; then
         print_message $GREEN "✅ 机器人启动成功 (PID: $bot_pid)"
         print_message $CYAN "📋 日志文件: $project_dir/bot.log"
-        return 0
+        
+        # 额外检查：确保机器人真正连接成功
+        print_message $YELLOW "🔄 验证机器人连接状态..."
+        sleep 3
+        
+        if ps -p $bot_pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ 机器人运行稳定"
+            return 0
+        else
+            print_message $RED "❌ 机器人启动后异常退出"
+            print_message $YELLOW "💡 查看错误日志:"
+            if [ -f "bot.log" ]; then
+                tail -10 bot.log
+            fi
+            rm -f bot.pid
+            return 1
+        fi
     else
         print_message $RED "❌ 机器人启动失败"
-        print_message $YELLOW "💡 检查日志: cat $project_dir/bot.log"
+        print_message $YELLOW "💡 错误日志:"
+        if [ -f "bot.log" ]; then
+            cat bot.log
+        fi
         rm -f bot.pid
         return 1
     fi
@@ -1479,10 +1535,20 @@ main() {
     start_services
     
     # 🆕 第六步：自动启动机器人
-    auto_start_bot
+    if auto_start_bot; then
+        print_message $GREEN "✅ 机器人启动成功"
+    else
+        print_message $RED "❌ 机器人启动失败，停止安装"
+        print_message $YELLOW "💡 请检查配置后重新运行安装程序"
+        exit 1
+    fi
     
     # 🆕 第七步：设置开机自启
-    setup_autostart
+    if setup_autostart; then
+        print_message $GREEN "✅ 开机自启设置成功"
+    else
+        print_message $YELLOW "⚠️ 开机自启设置失败，但不影响正常使用"
+    fi
     
     # 第八步：显示完成
     show_completion
