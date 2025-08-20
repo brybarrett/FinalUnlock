@@ -49,7 +49,7 @@ PROJECT_DIR = Path(__file__).parent.absolute()
 PID_FILE = PROJECT_DIR / "bot.pid"
 GUARD_PID_FILE = PROJECT_DIR / "guard.pid"
 BOT_LOG_FILE = PROJECT_DIR / "bot.log"
-SERVICE_NAME = "finalunlock-guard"
+SERVICE_NAME = "finalunlock-bot"
 SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 
 # 时区设置
@@ -126,6 +126,7 @@ class SystemGuard:
         }
         
         try:
+            # 方法1：检查PID文件
             if PID_FILE.exists():
                 with open(PID_FILE, 'r') as f:
                     pid = int(f.read().strip())
@@ -145,12 +146,40 @@ class SystemGuard:
                             'details': f'进程正常运行，PID: {pid}',
                             'health': '✅'
                         })
+                        return result
                     else:
                         result['details'] = f'PID {pid} 不是bot.py进程'
                 else:
                     result['details'] = f'PID {pid} 进程不存在'
+            
+            # 方法2：如果PID文件检查失败，尝试通过进程名查找
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+                try:
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'bot.py' in cmdline and str(PROJECT_DIR) in cmdline:
+                        # 找到了运行的bot.py进程
+                        process = psutil.Process(proc.info['pid'])
+                        uptime_seconds = time.time() - proc.info['create_time']
+                        uptime_str = str(timedelta(seconds=int(uptime_seconds)))
+                        
+                        result.update({
+                            'status': 'running',
+                            'pid': proc.info['pid'],
+                            'cpu_percent': round(process.cpu_percent(), 2),
+                            'memory_mb': round(process.memory_info().rss / 1024 / 1024, 2),
+                            'uptime': uptime_str,
+                            'details': f'进程正常运行，PID: {proc.info["pid"]} (通过进程扫描发现)',
+                            'health': '✅'
+                        })
+                        return result
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            # 如果都没找到，设置最终的错误信息
+            if not PID_FILE.exists():
+                result['details'] = 'PID文件不存在，且未发现运行中的bot.py进程'
             else:
-                result['details'] = 'PID文件不存在'
+                result['details'] = 'PID文件存在但进程已停止，且未发现其他运行中的bot.py进程'
                 
         except Exception as e:
             result['details'] = f'检查进程时出错: {str(e)}'
@@ -641,61 +670,36 @@ class SystemGuard:
             return False
     
     def setup_autostart(self) -> bool:
-        """设置开机自启"""
+        """检查并确保开机自启服务存在"""
         try:
-            self.logger.info("开始设置Guard开机自启...")
+            self.logger.info("检查开机自启服务状态...")
             
-            # 创建systemd服务文件内容
-            service_content = f"""[Unit]
-Description=FinalUnlock Guard Daemon
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory={PROJECT_DIR}
-Environment=PATH={PROJECT_DIR}/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStartPre=/bin/bash -c 'cd {PROJECT_DIR} && source venv/bin/activate'
-ExecStart=/bin/bash -c 'cd {PROJECT_DIR} && source venv/bin/activate && python guard.py daemon'
-ExecStop=/bin/bash -c 'if [ -f {GUARD_PID_FILE} ]; then kill $(cat {GUARD_PID_FILE}); rm -f {GUARD_PID_FILE}; fi'
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-"""
+            # 检查服务是否已存在
+            if Path(SERVICE_FILE).exists():
+                # 检查是否已启用
+                check_enabled = subprocess.run(
+                    ['systemctl', 'is-enabled', SERVICE_NAME],
+                    capture_output=True, text=True
+                )
+                
+                if check_enabled.returncode == 0:
+                    self.logger.info("开机自启服务已存在且已启用")
+                    return True
+                else:
+                    # 存在但未启用，尝试启用
+                    try:
+                        subprocess.run(['sudo', 'systemctl', 'enable', SERVICE_NAME], check=True)
+                        self.logger.info("开机自启服务已启用")
+                        return True
+                    except subprocess.CalledProcessError:
+                        self.logger.error("启用开机自启服务失败")
+                        return False
+            else:
+                self.logger.warning("开机自启服务文件不存在，请使用主管理脚本创建")
+                return False
             
-            # 写入临时文件
-            temp_service_file = f'/tmp/{SERVICE_NAME}.service'
-            with open(temp_service_file, 'w') as f:
-                f.write(service_content)
-            
-            # 复制到systemd目录
-            subprocess.run(['sudo', 'cp', temp_service_file, SERVICE_FILE], check=True)
-            
-            # 设置权限
-            subprocess.run(['sudo', 'chmod', '644', SERVICE_FILE], check=True)
-            
-            # 重新加载systemd
-            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
-            
-            # 启用服务
-            subprocess.run(['sudo', 'systemctl', 'enable', SERVICE_NAME], check=True)
-            
-            # 清理临时文件
-            os.remove(temp_service_file)
-            
-            self.logger.info("Guard开机自启设置成功")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"设置开机自启失败 (命令执行错误): {e}")
-            return False
         except Exception as e:
-            self.logger.error(f"设置开机自启失败: {e}")
+            self.logger.error(f"检查开机自启失败: {e}")
             return False
     
     def remove_autostart(self) -> bool:

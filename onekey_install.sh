@@ -650,9 +650,9 @@ WantedBy=multi-user.target"
 
 show_completion() {
     echo
-    print_message $PURPLE "================================${NC}"
-    print_message $PURPLE "   🎉 安装完成！ 🎉${NC}"
-    print_message $PURPLE "================================${NC}"
+    print_message $PURPLE "================================"
+    print_message $PURPLE "   🎉 安装完成！ 🎉"
+    print_message $PURPLE "================================"
     echo
     
     print_message $GREEN "✅ FinalShell激活码机器人已就绪"
