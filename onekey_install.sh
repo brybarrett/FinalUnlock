@@ -1827,6 +1827,13 @@ main() {
         print_message $YELLOW "⚠️ 开机自启设置失败，但不影响正常使用"
     fi
     
+    # 🆕 第六点五步：创建全局命令
+    if create_global_command; then
+        print_message $GREEN "✅ 全局命令创建成功"
+    else
+        print_message $YELLOW "⚠️ 全局命令创建失败，但不影响正常使用"
+    fi
+    
     # 🆕 第七步：启动Guard服务 (在bot启动后)
     start_services
     
@@ -1846,6 +1853,72 @@ main() {
 # ==========================================
 # 自动更新功能
 # ==========================================
+
+# 创建全局命令
+create_global_command() {
+    print_message $BLUE "🔧 创建全局命令 fn-bot..."
+    
+    local project_dir="/usr/local/FinalUnlock"
+    
+    # 检查项目目录和start.sh是否存在
+    if [ ! -d "$project_dir" ] || [ ! -f "$project_dir/start.sh" ]; then
+        print_message $RED "❌ 项目目录或start.sh不存在"
+        return 1
+    fi
+    
+    # 确保start.sh有执行权限
+    chmod +x "$project_dir/start.sh"
+    
+    # 创建全局命令脚本内容
+    local command_content='#!/bin/bash
+# FinalUnlock 全局命令
+cd "/usr/local/FinalUnlock" || {
+    echo "错误：无法进入项目目录 /usr/local/FinalUnlock"
+    exit 1
+}
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+fi
+if [ -f "start.sh" ]; then
+    exec "./start.sh" "$@"
+else
+    echo "错误：start.sh 不存在"
+    exit 1
+fi'
+    
+    # 尝试创建全局命令
+    if echo "$command_content" | sudo tee /usr/local/bin/fn-bot > /dev/null 2>&1; then
+        if sudo chmod +x /usr/local/bin/fn-bot 2>/dev/null; then
+            print_message $GREEN "✅ 全局命令 fn-bot 创建成功"
+            print_message $CYAN "💡 现在可以在任何位置使用 'fn-bot' 命令"
+            return 0
+        else
+            print_message $YELLOW "⚠️ 设置执行权限失败"
+        fi
+    else
+        print_message $YELLOW "⚠️ 需要sudo权限创建全局命令"
+    fi
+    
+    # 如果sudo失败，尝试创建到用户本地bin目录
+    local local_bin="$HOME/.local/bin"
+    mkdir -p "$local_bin" 2>/dev/null
+    
+    if echo "$command_content" > "$local_bin/fn-bot" 2>/dev/null; then
+        chmod +x "$local_bin/fn-bot" 2>/dev/null
+        print_message $GREEN "✅ 本地命令 fn-bot 创建成功"
+        
+        # 检查PATH
+        if [[ ":$PATH:" != *":$local_bin:"* ]]; then
+            print_message $YELLOW "💡 请将 $local_bin 添加到PATH:"
+            print_message $CYAN "   echo 'export PATH=\"$local_bin:\$PATH\"' >> ~/.bashrc"
+            print_message $CYAN "   source ~/.bashrc"
+        fi
+        return 0
+    else
+        print_message $RED "❌ 全局命令创建失败"
+        return 1
+    fi
+}
 
 # 自动更新项目
 auto_update_project() {
@@ -1978,6 +2051,15 @@ auto_update_project() {
         else
             print_message $YELLOW "⚠️ 虚拟环境不存在，跳过依赖更新"
         fi
+    fi
+    
+    # 重新创建全局命令
+    print_message $CYAN "🔧 重新创建全局命令..."
+    cd "$project_dir"
+    if create_global_command; then
+        print_message $GREEN "✅ 全局命令重新创建成功"
+    else
+        print_message $YELLOW "⚠️ 全局命令创建失败，但不影响正常使用"
     fi
     
     # 重启服务
@@ -2157,6 +2239,13 @@ main_install() {
         print_message $GREEN "✅ 开机自启设置成功"
     else
         print_message $YELLOW "⚠️ 开机自启设置失败，但不影响正常使用"
+    fi
+    
+    # 🆕 第六点五步：创建全局命令
+    if create_global_command; then
+        print_message $GREEN "✅ 全局命令创建成功"
+    else
+        print_message $YELLOW "⚠️ 全局命令创建失败，但不影响正常使用"
     fi
     
     # 🆕 第七步：启动Guard服务 (在bot启动后)
