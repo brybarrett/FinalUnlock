@@ -674,3 +674,28 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# 在guard.py中找到发送报告的函数，添加事件循环处理
+import asyncio
+import nest_asyncio
+
+# 在发送报告函数开始处添加
+def send_report_to_telegram(report_content, chat_ids):
+    try:
+        # 修复事件循环问题
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # 使用nest_asyncio允许嵌套事件循环
+        nest_asyncio.apply()
+        
+        # 其余发送逻辑...
+        
+    except Exception as e:
+        logger.error(f"发送报告失败: {e}")

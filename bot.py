@@ -565,6 +565,7 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"处理guard命令时出错: {e}")
 
 # 主程序
+# 修复第600-610行的run_polling调用
 if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
@@ -573,10 +574,13 @@ if __name__ == '__main__':
         
         # 错误处理器
         async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-            logger.error(f"更新处理出错: {context.error}")
-            if update and hasattr(update, 'effective_message') and update.effective_message:
+            logger.error(f"更新处理出错: {context.error}", exc_info=context.error)
+            if update and hasattr(update, 'effective_chat') and update.effective_chat:
                 try:
-                    await update.effective_message.reply_text('处理请求时出现错误，请稍后重试。')
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="抱歉，处理您的请求时出现了错误，请稍后重试。"
+                    )
                 except Exception as e:
                     logger.error(f"发送错误消息失败: {e}")
         
@@ -598,14 +602,16 @@ if __name__ == '__main__':
         logger.info('机器人启动成功，开始轮询...')
         print('Bot 运行中...')
         
-        # 启动机器人
+        # 🔧 修复：使用兼容v20.0+的参数
         app.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=None,
             timeout=30,
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30,
-            pool_timeout=30,
-            drop_pending_updates=True
+            bootstrap_retries=-1,
+            read_timeout=None,
+            write_timeout=None,
+            connect_timeout=None,
+            pool_timeout=None
         )
         
     except KeyboardInterrupt:
