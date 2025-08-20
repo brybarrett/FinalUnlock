@@ -191,7 +191,6 @@ detailed_system_check() {
 }
 
 # 添加手动安装备选方案
-# 在manual_installation_fallback函数中，项目克隆成功后添加
 manual_installation_fallback() {
     print_message $YELLOW "🔧 尝试手动安装备选方案..."
     
@@ -207,11 +206,6 @@ manual_installation_fallback() {
     fi
     
     cd "$install_dir"
-    
-    # 🔧 新增：设置shell脚本执行权限
-    print_message $YELLOW "🔐 设置脚本执行权限..."
-    chmod +x *.sh 2>/dev/null || true
-    print_message $GREEN "✅ 脚本权限设置完成"
     
     # 创建虚拟环境
     print_message $BLUE "🐍 创建虚拟环境..."
@@ -515,6 +509,65 @@ show_completion() {
 # 主执行流程
 # ==========================================
 
+# 在start_services函数后添加开机自启函数
+setup_autostart() {
+    print_message $BLUE "⚙️ 设置开机自启..."
+    
+    # 查找项目目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock"; do
+        if [ -d "$dir" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 未找到项目目录"
+        return 1
+    fi
+    
+    # 创建systemd服务文件
+    local service_file="/etc/systemd/system/finalunlock-bot.service"
+    
+    cat > /tmp/finalunlock-bot.service << EOF
+[Unit]
+Description=FinalUnlock Telegram Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=$project_dir
+Environment=PATH=$project_dir/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/bash -c 'cd $project_dir && source venv/bin/activate'
+ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python3 bot.py > bot.log 2>&1 & echo \$! > bot.pid'
+ExecStop=/bin/bash -c 'if [ -f $project_dir/bot.pid ]; then kill \$(cat $project_dir/bot.pid); rm -f $project_dir/bot.pid; fi'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # 安装服务文件
+    if sudo cp /tmp/finalunlock-bot.service "$service_file"; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable finalunlock-bot.service
+        print_message $GREEN "✅ 开机自启设置成功"
+        print_message $CYAN "💡 服务管理命令:"
+        print_message $CYAN "   启动: sudo systemctl start finalunlock-bot"
+        print_message $CYAN "   停止: sudo systemctl stop finalunlock-bot"
+        print_message $CYAN "   状态: sudo systemctl status finalunlock-bot"
+    else
+        print_message $YELLOW "⚠️ 开机自启设置失败，需要手动配置"
+    fi
+    
+    rm -f /tmp/finalunlock-bot.service
+}
+
+# 修改main函数，在start_services后添加开机自启
 main() {
     # 第一步：预检查和清理
     precheck_and_cleanup
@@ -537,7 +590,10 @@ main() {
     # 第五步：启动服务
     start_services
     
-    # 第六步：显示完成
+    # 🆕 第六步：设置开机自启
+    setup_autostart
+    
+    # 第七步：显示完成
     show_completion
 }
 

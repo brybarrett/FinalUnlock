@@ -286,6 +286,7 @@ create_startup_commands() {
 }
 
 # 主安装流程
+# 修改main_installation函数，确保调用开机自启设置
 main_installation() {
     # 1. 智能系统检测
     intelligent_system_setup
@@ -308,11 +309,236 @@ main_installation() {
     # 7. 创建启动命令
     create_startup_commands
     
+    # 8. 🆕 自动启动机器人
+    auto_start_bot
+    
+    # 9. 🆕 设置开机自启
+    setup_autostart
+    
     print_message $GREEN "✅ 安装完成！"
     print_message $YELLOW "💡 项目已安装到: $INSTALL_DIR"
     print_message $CYAN "🚀 使用 'fn-bot' 命令管理机器人"
 }
 
-# 执行主安装流程
-main_installation
+# 新增：自动启动机器人函数
+auto_start_bot() {
+    print_message $BLUE "🚀 自动启动机器人..."
+    
+    cd "$INSTALL_DIR"
+    
+    # 激活虚拟环境
+    if [ -d "venv" ]; then
+        source venv/bin/activate
+    fi
+    
+    # 检查配置文件
+    if [ ! -f ".env" ]; then
+        print_message $YELLOW "⚠️ 未找到配置文件，需要先配置Bot Token和Chat ID"
+        return 1
+    fi
+    
+    # 设置脚本权限
+    chmod +x *.sh 2>/dev/null || true
+    
+    # 启动机器人到后台
+    print_message $YELLOW "🔄 启动机器人到后台..."
+    nohup python3 bot.py > bot.log 2>&1 &
+    local bot_pid=$!
+    
+    # 保存PID
+    echo $bot_pid > bot.pid
+    
+    # 验证启动
+    sleep 3
+    if ps -p $bot_pid > /dev/null 2>&1; then
+        print_message $GREEN "✅ 机器人启动成功 (PID: $bot_pid)"
+        print_message $CYAN "📋 日志文件: $INSTALL_DIR/bot.log"
+        return 0
+    else
+        print_message $RED "❌ 机器人启动失败"
+        rm -f bot.pid
+        return 1
+    fi
+}
+
+# 新增：设置开机自启函数
+setup_autostart() {
+    print_message $BLUE "⚙️ 设置开机自启..."
+    
+    # 创建systemd服务文件
+    local service_file="/etc/systemd/system/finalunlock-bot.service"
+    
+    cat > /tmp/finalunlock-bot.service << EOF
+[Unit]
+Description=FinalUnlock Telegram Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$INSTALL_DIR/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate'
+ExecStart=/bin/bash -c 'cd $INSTALL_DIR && source venv/bin/activate && nohup python3 bot.py > bot.log 2>&1 & echo \$! > bot.pid'
+ExecStop=/bin/bash -c 'if [ -f $INSTALL_DIR/bot.pid ]; then kill \$(cat $INSTALL_DIR/bot.pid); rm -f $INSTALL_DIR/bot.pid; fi'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # 安装服务文件
+    if sudo cp /tmp/finalunlock-bot.service "$service_file"; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable finalunlock-bot.service
+        print_message $GREEN "✅ 开机自启设置成功"
+        print_message $CYAN "💡 服务管理命令:"
+        print_message $CYAN "   启动: sudo systemctl start finalunlock-bot"
+        print_message $CYAN "   停止: sudo systemctl stop finalunlock-bot"
+        print_message $CYAN "   状态: sudo systemctl status finalunlock-bot"
+    else
+        print_message $YELLOW "⚠️ 开机自启设置失败，需要手动配置"
+    fi
+    
+    rm -f /tmp/finalunlock-bot.service
+}
+
+# 新增：安装后管理菜单
+show_post_install_menu() {
+    while true; do
+        echo
+        print_message $PURPLE "================================"
+        print_message $PURPLE "   🎉 安装完成管理菜单 🎉"
+        print_message $PURPLE "================================"
+        echo
+        
+        # 检查机器人状态
+        local bot_status="❌ 未运行"
+        if [ -f "$INSTALL_DIR/bot.pid" ]; then
+            local pid=$(cat "$INSTALL_DIR/bot.pid" 2>/dev/null)
+            if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+                bot_status="✅ 运行中 (PID: $pid)"
+            fi
+        fi
+        
+        print_message $CYAN "当前状态: $bot_status"
+        print_message $CYAN "安装目录: $INSTALL_DIR"
+        echo
+        
+        print_message $BLUE "=== 🤖 机器人管理 ==="
+        print_message $CYAN "[1] 启动/重启机器人"
+        print_message $CYAN "[2] 停止机器人"
+        print_message $CYAN "[3] 查看运行日志"
+        print_message $CYAN "[4] 检查机器人状态"
+        echo
+        print_message $BLUE "=== ⚙️ 系统管理 ==="
+        print_message $CYAN "[5] 配置Bot Token和Chat ID"
+        print_message $CYAN "[6] 测试机器人功能"
+        print_message $CYAN "[7] 查看系统服务状态"
+        echo
+        print_message $CYAN "[0] 退出安装程序"
+        echo
+        
+        read -p "请选择操作 [0-7]: " choice
+        
+        case $choice in
+            1)
+                cd "$INSTALL_DIR"
+                if [ -f "bot.pid" ]; then
+                    local old_pid=$(cat bot.pid)
+                    if ps -p $old_pid > /dev/null 2>&1; then
+                        print_message $YELLOW "🔄 停止现有进程..."
+                        kill $old_pid 2>/dev/null
+                        sleep 2
+                    fi
+                fi
+                auto_start_bot
+                ;;
+            2)
+                if [ -f "$INSTALL_DIR/bot.pid" ]; then
+                    local pid=$(cat "$INSTALL_DIR/bot.pid")
+                    if ps -p $pid > /dev/null 2>&1; then
+                        kill $pid
+                        rm -f "$INSTALL_DIR/bot.pid"
+                        print_message $GREEN "✅ 机器人已停止"
+                    else
+                        print_message $YELLOW "⚠️ 机器人未在运行"
+                    fi
+                else
+                    print_message $YELLOW "⚠️ 未找到运行中的机器人"
+                fi
+                ;;
+            3)
+                if [ -f "$INSTALL_DIR/bot.log" ]; then
+                    print_message $BLUE "📋 最新日志 (按Ctrl+C退出):"
+                    tail -f "$INSTALL_DIR/bot.log"
+                else
+                    print_message $YELLOW "⚠️ 日志文件不存在"
+                fi
+                ;;
+            4)
+                cd "$INSTALL_DIR"
+                if [ -f "bot.pid" ]; then
+                    local pid=$(cat bot.pid)
+                    if ps -p $pid > /dev/null 2>&1; then
+                        print_message $GREEN "✅ 机器人正在运行 (PID: $pid)"
+                        print_message $CYAN "📊 进程信息:"
+                        ps -p $pid -o pid,ppid,cmd,etime,pcpu,pmem
+                    else
+                        print_message $RED "❌ 机器人进程不存在"
+                    fi
+                else
+                    print_message $YELLOW "⚠️ 未找到PID文件"
+                fi
+                ;;
+            5)
+                print_message $BLUE "⚙️ 配置Bot Token和Chat ID..."
+                cd "$INSTALL_DIR"
+                # 这里可以调用配置函数或启动start.sh的配置选项
+                ./start.sh
+                ;;
+            6)
+                print_message $BLUE "🧪 测试机器人功能..."
+                if [ -f "$INSTALL_DIR/.env" ]; then
+                    cd "$INSTALL_DIR"
+                    source .env
+                    if [ -n "$BOT_TOKEN" ]; then
+                        print_message $YELLOW "🔄 测试Bot Token..."
+                        if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
+                            print_message $GREEN "✅ Bot Token有效"
+                        else
+                            print_message $RED "❌ Bot Token无效"
+                        fi
+                    else
+                        print_message $RED "❌ 未配置Bot Token"
+                    fi
+                else
+                    print_message $RED "❌ 配置文件不存在"
+                fi
+                ;;
+            7)
+                print_message $BLUE "📊 系统服务状态:"
+                if systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
+                    print_message $GREEN "✅ 开机自启已启用"
+                    systemctl status finalunlock-bot.service --no-pager
+                else
+                    print_message $YELLOW "⚠️ 开机自启未启用"
+                fi
+                ;;
+            0)
+                print_message $GREEN "👋 感谢使用FinalUnlock！"
+                print_message $CYAN "💡 使用 'fn-bot' 命令可随时管理机器人"
+                exit 0
+                ;;
+            *)
+                print_message $RED "❌ 无效选择，请重新输入"
+                ;;
+        esac
+        
+        echo
+        read -p "按回车键继续..." -r
+    done
+}
 
