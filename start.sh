@@ -99,6 +99,15 @@ download_project() {
 register_global_command() {
     print_message $BLUE "🔧 注册全局命令 fn-bot..."
     
+    # 检查操作系统
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
+        print_message $YELLOW "⚠️ 检测到Windows环境"
+        print_message $YELLOW "💡 此项目设计为在Linux系统上运行"
+        print_message $CYAN "📋 在Linux系统上，fn-bot命令将自动注册到 /usr/local/bin/"
+        print_message $CYAN "📋 当前可以直接使用: bash start.sh"
+        return 1
+    fi
+    
     # 获取脚本的绝对路径
     local script_path="$PROJECT_DIR/start.sh"
     
@@ -111,38 +120,79 @@ register_global_command() {
     # 确保脚本有执行权限
     chmod +x "$script_path"
     
-    # 创建全局命令
-    local bin_dir="/usr/local/bin"
-    local command_path="$bin_dir/fn-bot"
+    # 尝试多个可能的bin目录
+    local bin_dirs=("/usr/local/bin" "$HOME/.local/bin" "/usr/bin")
+    local command_name="fn-bot"
+    local success=false
     
-    # 检查是否有权限写入 /usr/local/bin
-    if [ ! -w "$bin_dir" ]; then
-        print_message $YELLOW "⚠️ 没有权限写入 $bin_dir，尝试使用 sudo..."
-        sudo tee "$command_path" > /dev/null << EOF
+    for bin_dir in "${bin_dirs[@]}"; do
+        local command_path="$bin_dir/$command_name"
+        
+        # 确保目录存在
+        if [ "$bin_dir" = "$HOME/.local/bin" ]; then
+            mkdir -p "$bin_dir" 2>/dev/null
+        fi
+        
+        # 检查目录是否存在且可写
+        if [ -d "$bin_dir" ]; then
+            if [ -w "$bin_dir" ]; then
+                # 直接创建命令
+                print_message $CYAN "📝 在 $bin_dir 创建全局命令..."
+                tee "$command_path" > /dev/null << EOF
 #!/bin/bash
 "$script_path" "\$@"
 EOF
-        sudo chmod +x "$command_path"
-    else
-        # 直接创建命令
-        tee "$command_path" > /dev/null << EOF
+                chmod +x "$command_path"
+                
+                if [ $? -eq 0 ]; then
+                    print_message $GREEN "✅ 全局命令 fn-bot 注册成功: $command_path"
+                    success=true
+                    break
+                fi
+            elif [ "$bin_dir" = "/usr/local/bin" ] || [ "$bin_dir" = "/usr/bin" ]; then
+                # 需要sudo权限的目录
+                print_message $YELLOW "⚠️ 没有权限写入 $bin_dir，尝试使用 sudo..."
+                if sudo tee "$command_path" > /dev/null << EOF
 #!/bin/bash
 "$script_path" "\$@"
 EOF
-        chmod +x "$command_path"
-    fi
+                then
+                    sudo chmod +x "$command_path"
+                    if [ $? -eq 0 ]; then
+                        print_message $GREEN "✅ 全局命令 fn-bot 注册成功: $command_path"
+                        success=true
+                        break
+                    fi
+                fi
+            fi
+        fi
+    done
     
-    if [ $? -eq 0 ]; then
-        print_message $GREEN "✅ 全局命令 fn-bot 注册成功"
+    if [ "$success" = true ]; then
         print_message $CYAN "现在可以在任意目录使用 'fn-bot' 命令启动机器人管理脚本"
+        
+        # 检查PATH中是否包含安装目录
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && [ -f "$HOME/.local/bin/$command_name" ]; then
+            print_message $YELLOW "💡 提示：请将 $HOME/.local/bin 添加到PATH环境变量"
+            print_message $CYAN "执行：echo 'export PATH=\$HOME/.local/bin:\$PATH' >> ~/.bashrc && source ~/.bashrc"
+        fi
+        
+        return 0
     else
         print_message $RED "❌ 全局命令注册失败"
+        print_message $YELLOW "💡 您仍然可以使用完整路径运行脚本："
+        print_message $CYAN "   bash $script_path"
         return 1
     fi
 }
 
 # 检查全局命令是否已注册
 check_global_command() {
+    # 在Windows环境下始终返回失败，因为不支持全局命令
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
+        return 1
+    fi
+    
     if command -v fn-bot &> /dev/null; then
         return 0
     else
