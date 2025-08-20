@@ -1780,85 +1780,262 @@ check_venv() {
     esac
 }
 
-# 卸载机器人
-uninstall_bot() {
-    print_message $BLUE "🗑️ 卸载机器人..."
+# 卸载Python依赖
+uninstall_dependencies() {
+    print_message $BLUE "📦 卸载FinalUnlock项目依赖..."
     
-    print_message $RED "⚠️ 这将停止机器人并强制删除所有 FinalUnlock 相关目录及文件"
-    print_message $RED "⚠️ 包括: FinalUnlock, FinalUnlock.backup.* 等所有相关目录"
+    # 读取requirements.txt中的依赖
+    if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+        print_message $YELLOW "⚠️ 未找到requirements.txt文件"
+        return 1
+    fi
+    
+    print_message $YELLOW "📋 将要卸载以下依赖包:"
+    cat "$PROJECT_DIR/requirements.txt" | while read -r line; do
+        if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+            # 提取包名（去除版本号）
+            package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+            print_message $CYAN "  • $package_name"
+        fi
+    done
+    
+    echo
+    read -p "确认卸载这些依赖包? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_message $YELLOW "❌ 取消卸载依赖"
+        return 0
+    fi
+    
+    # 检查虚拟环境
+    local venv_dir="$PROJECT_DIR/venv"
+    local use_venv=false
+    
+    if [ -d "$venv_dir" ]; then
+        print_message $BLUE "🐍 检测到虚拟环境，将从虚拟环境中卸载依赖"
+        source "$venv_dir/bin/activate"
+        use_venv=true
+        PIP_CMD="pip"
+    else
+        print_message $BLUE "🌐 将从系统Python环境中卸载依赖"
+        PIP_CMD="$PIP_CMD"
+    fi
+    
+    # 卸载依赖
+    print_message $YELLOW "🔄 正在卸载依赖包..."
+    local uninstalled_count=0
+    local failed_count=0
+    
+    while read -r line; do
+        if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+            # 提取包名（去除版本号）
+            package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+            
+            print_message $CYAN "🔄 卸载 $package_name..."
+            if $PIP_CMD uninstall -y "$package_name" > /dev/null 2>&1; then
+                print_message $GREEN "✅ $package_name 卸载成功"
+                ((uninstalled_count++))
+            else
+                print_message $YELLOW "⚠️ $package_name 卸载失败或未安装"
+                ((failed_count++))
+            fi
+        fi
+    done < "$PROJECT_DIR/requirements.txt"
+    
+    echo
+    print_message $BLUE "📊 卸载结果统计:"
+    print_message $GREEN "✅ 成功卸载: $uninstalled_count 个包"
+    if [ $failed_count -gt 0 ]; then
+        print_message $YELLOW "⚠️ 失败/未安装: $failed_count 个包"
+    fi
+    
+    # 如果使用虚拟环境，提示删除虚拟环境
+    if [ "$use_venv" = true ]; then
+        echo
+        read -p "是否同时删除虚拟环境目录? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            deactivate 2>/dev/null || true
+            rm -rf "$venv_dir"
+            print_message $GREEN "✅ 虚拟环境已删除"
+        fi
+    fi
+    
+    print_message $GREEN "✅ 依赖卸载完成"
+}
+
+# 完整卸载机器人（包含依赖卸载）
+uninstall_bot() {
+    print_message $BLUE "🗑️ 完整卸载FinalUnlock机器人..."
+    
+    print_message $RED "⚠️ 这将执行以下操作:"
+    print_message $RED "   • 停止机器人和Guard进程"
+    print_message $RED "   • 删除所有FinalUnlock相关目录和文件"
+    print_message $RED "   • 卸载requirements.txt中的Python依赖包"
+    print_message $RED "   • 删除全局命令和快捷方式"
     print_message $RED "⚠️ 此操作不可逆，请谨慎操作！"
     echo
-    read -p "请输入 'yes' 确认删除: " confirm
     
-    if [ "$confirm" != "yes" ]; then
-        print_message $YELLOW "❌ 取消卸载操作"
-        return
+    print_message $YELLOW "请选择卸载方式:"
+    print_message $CYAN "[1] 完整卸载（包括Python依赖）"
+    print_message $CYAN "[2] 仅删除项目文件（保留Python依赖）"
+    print_message $CYAN "[0] 取消卸载"
+    echo
+    
+    read -p "请选择 [0-2]: " uninstall_choice
+    
+    case $uninstall_choice in
+        1)
+            print_message $BLUE "🔄 选择完整卸载模式"
+            echo
+            read -p "请输入 'UNINSTALL' 确认完整卸载: " confirm
+            
+            if [ "$confirm" != "UNINSTALL" ]; then
+                print_message $YELLOW "❌ 取消卸载操作"
+                return
+            fi
+            
+            # 先卸载Python依赖
+            uninstall_dependencies
+            echo
+            
+            # 然后删除项目文件
+            uninstall_project_files
+            ;;
+        2)
+            print_message $BLUE "🔄 选择仅删除项目文件模式"
+            echo
+            read -p "请输入 'DELETE' 确认删除项目文件: " confirm
+            
+            if [ "$confirm" != "DELETE" ]; then
+                print_message $YELLOW "❌ 取消卸载操作"
+                return
+            fi
+            
+            # 仅删除项目文件
+            uninstall_project_files
+            ;;
+        0)
+            print_message $YELLOW "❌ 取消卸载操作"
+            return
+            ;;
+        *)
+            print_message $RED "❌ 无效选择"
+            return
+            ;;
+    esac
+}
+
+# 删除项目文件
+uninstall_project_files() {
+    print_message $BLUE "🗑️ 删除项目文件..."
+    
+    # 停止机器人和Guard进程
+    print_message $YELLOW "🛑 停止所有相关进程..."
+    stop_bot_silent
+    
+    # 停止Guard进程
+    if [ -f "$PROJECT_DIR/guard.pid" ]; then
+        local guard_pid=$(cat "$PROJECT_DIR/guard.pid" 2>/dev/null)
+        if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+            kill $guard_pid 2>/dev/null
+            sleep 2
+            if ps -p $guard_pid > /dev/null 2>&1; then
+                kill -9 $guard_pid 2>/dev/null
+            fi
+            print_message $GREEN "✅ Guard进程已停止"
+        fi
     fi
     
-    # 停止机器人
-    stop_bot
+    # 停止监控守护进程
+    if [ -f "$PROJECT_DIR/monitor.pid" ]; then
+        local monitor_pid=$(cat "$PROJECT_DIR/monitor.pid" 2>/dev/null)
+        if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+            kill $monitor_pid 2>/dev/null
+            sleep 2
+            print_message $GREEN "✅ 监控进程已停止"
+        fi
+    fi
+    
+    # 删除systemd服务
+    print_message $YELLOW "🔄 删除系统服务..."
+    if systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
+        sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
+        sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/finalunlock-bot.service 2>/dev/null || true
+        sudo systemctl daemon-reload 2>/dev/null || true
+        print_message $GREEN "✅ 系统服务已删除"
+    fi
     
     # 删除全局命令
-    print_message $YELLOW "🔄 正在删除全局命令 fn-bot..."
-    local command_path="/usr/local/bin/fn-bot"
-    if [ -f "$command_path" ]; then
-        if [ -w "$command_path" ]; then
-            rm -f "$command_path"
-        else
-            sudo rm -f "$command_path"
+    print_message $YELLOW "🔄 删除全局命令..."
+    local command_paths=("/usr/local/bin/fn-bot" "$HOME/.local/bin/fn-bot")
+    for command_path in "${command_paths[@]}"; do
+        if [ -f "$command_path" ]; then
+            if [ -w "$command_path" ]; then
+                rm -f "$command_path"
+            else
+                sudo rm -f "$command_path" 2>/dev/null || true
+            fi
+            print_message $GREEN "✅ 已删除: $command_path"
         fi
-        print_message $GREEN "✅ 全局命令 fn-bot 已删除"
-    fi
-    
-    # 删除本地命令
-    local local_bin="$HOME/.local/bin"
-    if [ -f "$local_bin/fn-bot" ]; then
-        print_message $YELLOW "🔄 正在删除本地命令 fn-bot..."
-        rm -f "$local_bin/fn-bot"
-        print_message $GREEN "✅ 本地命令 fn-bot 已删除"
-    fi
+    done
     
     # 删除桌面快捷方式
     local desktop_file="$HOME/.local/share/applications/finalshell-bot.desktop"
     if [ -f "$desktop_file" ]; then
-        print_message $YELLOW "🔄 正在删除桌面快捷方式..."
         rm -f "$desktop_file"
         print_message $GREEN "✅ 桌面快捷方式已删除"
     fi
     
-    # 获取项目目录的父目录
+    # 获取项目目录信息
     local parent_dir=$(dirname "$PROJECT_DIR")
     local project_name=$(basename "$PROJECT_DIR")
     
     # 切换到父目录
-    cd "$parent_dir"
+    cd "$parent_dir" 2>/dev/null || cd "$HOME"
     
     # 删除所有FinalUnlock相关目录
-    print_message $YELLOW "🔄 正在删除所有 FinalUnlock 相关目录..."
+    print_message $YELLOW "🔄 删除所有FinalUnlock相关目录..."
     
     # 删除主目录
     if [ -d "$project_name" ]; then
         rm -rf "$project_name"
-        print_message $GREEN "✅ FinalUnlock 主目录已删除"
+        print_message $GREEN "✅ FinalUnlock主目录已删除: $PROJECT_DIR"
     fi
     
-    # 删除所有备份目录
+    # 删除备份目录
+    local backup_count=0
     for backup_dir in "$project_name".backup.*; do
         if [ -d "$backup_dir" ]; then
             rm -rf "$backup_dir"
-            print_message $GREEN "✅ 备份目录 $backup_dir 已删除"
+            print_message $GREEN "✅ 备份目录已删除: $backup_dir"
+            ((backup_count++))
         fi
     done
     
-    # 删除可能的其他相关目录
+    # 删除其他相关目录
     for related_dir in *FinalUnlock*; do
         if [ -d "$related_dir" ] && [ "$related_dir" != "$project_name" ]; then
             rm -rf "$related_dir"
-            print_message $GREEN "✅ 相关目录 $related_dir 已删除"
+            print_message $GREEN "✅ 相关目录已删除: $related_dir"
         fi
     done
     
-    print_message $GREEN "✅ 所有 FinalUnlock 相关目录已完全删除"
+    # 清理临时文件
+    rm -f /tmp/finalunlock-*.* 2>/dev/null || true
+    
+    echo
+    print_message $GREEN "🎉 项目文件删除完成!"
+    print_message $BLUE "📊 清理统计:"
+    print_message $CYAN "  • 主目录: 已删除"
+    if [ $backup_count -gt 0 ]; then
+        print_message $CYAN "  • 备份目录: 已删除 $backup_count 个"
+    fi
+    print_message $CYAN "  • 系统服务: 已删除"
+    print_message $CYAN "  • 全局命令: 已删除"
+    
+    print_message $YELLOW "💡 提示: 如果需要重新安装，请重新下载项目文件"
     print_message $YELLOW "脚本将在3秒后退出..."
     sleep 3
     emergency_exit
@@ -2481,7 +2658,10 @@ show_menu() {
     echo -e "${CYAN}[6] 检查/修复依赖${NC}"
     echo -e "${CYAN}[7] 重新安装依赖${NC}"
     echo -e "${CYAN}[8] 检查/修复虚拟环境${NC}"
-    echo -e "${CYAN}[9] 卸载机器人${NC}"
+    echo -e "${CYAN}[9] 完整卸载机器人${NC}"
+    echo
+    echo -e "${BLUE}=== 🗑️ 卸载管理 ===${NC}"
+    echo -e "${CYAN}[u] 仅卸载Python依赖${NC}"
     echo
     echo -e "${BLUE}=== 🛡️ 守护进程管理 ===${NC}"
     echo -e "${CYAN}[g] Guard 守护进程管理${NC}"
@@ -2698,7 +2878,7 @@ main() {
     # 主菜单循环
     while true; do
         show_menu
-        read -p "请选择操作 [0-9cgmsvrf]: " choice
+        read -p "请选择操作 [0-9ucgmsvrf]: " choice
         
         case $choice in
             1)
@@ -2734,6 +2914,11 @@ main() {
                 ;;
             9)
                 uninstall_bot
+                ;;
+            u|U)
+                print_message $BLUE "🗑️ 卸载Python依赖包..."
+                uninstall_dependencies
+                read -p "按回车键继续..." -r
                 ;;
             g|G)
                 open_guard_menu
@@ -2801,7 +2986,7 @@ main() {
                 safe_exit
                 ;;
             *)
-                print_message $RED "❌ 无效选择，请输入 0-9、g、c、m、s、v、r 或 f"
+                print_message $RED "❌ 无效选择，请输入 0-9、u、g、c、m、s、v、r 或 f"
                 ;;
         esac
         
