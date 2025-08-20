@@ -481,9 +481,21 @@ install_dependencies_venv() {
         print_message $CYAN "💡 虚拟环境路径: $venv_dir"
         print_message $CYAN "💡 激活命令: source $venv_dir/bin/activate"
         
-        # 更新PYTHON_CMD为虚拟环境中的Python
-        PYTHON_CMD="$venv_dir/bin/python"
-        PIP_CMD="$venv_dir/bin/pip"
+        # 更新PYTHON_CMD为虚拟环境中的Python，但先验证文件是否存在
+        if [ -x "$venv_dir/bin/python" ]; then
+            PYTHON_CMD="$venv_dir/bin/python"
+        elif [ -x "$venv_dir/bin/python3" ]; then
+            PYTHON_CMD="$venv_dir/bin/python3"
+        else
+            print_message $YELLOW "⚠️ 虚拟环境Python不存在，使用系统Python"
+            PYTHON_CMD="python3"
+        fi
+        
+        if [ -x "$venv_dir/bin/pip" ]; then
+            PIP_CMD="$venv_dir/bin/pip"
+        else
+            PIP_CMD="$PYTHON_CMD -m pip"
+        fi
         
         return 0
     else
@@ -819,8 +831,17 @@ start_bot() {
     if [ -d "$venv_dir" ]; then
         print_message $BLUE "🐍 检测到虚拟环境，正在激活..."
         source "$venv_dir/bin/activate"
-        PYTHON_CMD="$venv_dir/bin/python"
-        print_message $GREEN "✅ 虚拟环境已激活"
+        # 验证并设置正确的Python命令
+        if [ -x "$venv_dir/bin/python" ]; then
+            PYTHON_CMD="$venv_dir/bin/python"
+        elif [ -x "$venv_dir/bin/python3" ]; then
+            PYTHON_CMD="$venv_dir/bin/python3"
+        elif command -v python &> /dev/null; then
+            PYTHON_CMD="python"
+        else
+            PYTHON_CMD="python3"
+        fi
+        print_message $GREEN "✅ 虚拟环境已激活，Python命令: $PYTHON_CMD"
     fi
     
     # 检查依赖
@@ -838,6 +859,18 @@ start_bot() {
     # 启动机器人（后台运行，脱离终端，实时日志记录）
     print_message $YELLOW "🔄 正在启动机器人到后台..."
     print_message $CYAN "💡 日志将实时记录到: $LOG_FILE"
+    
+    # 启动前最后检查是否有冲突进程
+    local conflicting_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
+    if [ -n "$conflicting_pids" ]; then
+        print_message $YELLOW "⚠️ 启动前发现冲突进程，正在清理..."
+        echo "$conflicting_pids" | while read -r cpid; do
+            if [ -n "$cpid" ]; then
+                kill -9 $cpid 2>/dev/null || true
+            fi
+        done
+        sleep 2
+    fi
     
     # 使用nohup启动，并实时记录日志
     nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
@@ -960,7 +993,16 @@ force_restart_bot() {
     local venv_dir="$PROJECT_DIR/venv"
     if [ -d "$venv_dir" ]; then
         source "$venv_dir/bin/activate"
-        PYTHON_CMD="$venv_dir/bin/python"
+        # 验证并设置正确的Python命令
+        if [ -x "$venv_dir/bin/python" ]; then
+            PYTHON_CMD="$venv_dir/bin/python"
+        elif [ -x "$venv_dir/bin/python3" ]; then
+            PYTHON_CMD="$venv_dir/bin/python3"
+        elif command -v python &> /dev/null; then
+            PYTHON_CMD="python"
+        else
+            PYTHON_CMD="python3"
+        fi
     fi
     
     # 启动机器人
@@ -1554,6 +1596,70 @@ test_bot_token() {
     return 1
 }
 
+# 发送测试消息到指定Chat ID
+send_test_message() {
+    local token="$1"
+    local chat_id="$2"
+    
+    if [ -z "$token" ] || [ -z "$chat_id" ]; then
+        return 1
+    fi
+    
+    # 生成测试消息
+    local test_time=$(date '+%Y-%m-%d %H:%M:%S')
+    local test_message="🧪 **FinalUnlock 配置测试**
+
+✅ Bot Token: 验证成功
+✅ Chat ID: 验证成功
+⏰ 测试时间: $test_time
+
+🎉 恭喜！机器人配置正确，可以正常接收和发送消息。
+
+💡 如果您收到这条消息，说明：
+• Bot Token 有效且可以连接到 Telegram API
+• Chat ID 正确且可以接收消息
+• 网络连接正常
+
+🚀 现在可以启动机器人开始使用了！"
+    
+    # 使用curl发送测试消息
+    if command -v curl &> /dev/null; then
+        local response=$(curl -s -X POST "https://api.telegram.org/bot$token/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"chat_id\": \"$chat_id\",
+                \"text\": \"$test_message\",
+                \"parse_mode\": \"Markdown\"
+            }" 2>/dev/null)
+        
+        if echo "$response" | grep -q '"ok":true'; then
+            return 0
+        else
+            # 如果Markdown解析失败，尝试纯文本
+            local simple_message="🧪 FinalUnlock 配置测试
+
+✅ Bot Token 和 Chat ID 验证成功！
+⏰ 测试时间: $test_time
+
+🎉 恭喜！机器人配置正确，可以正常收发消息。
+🚀 现在可以启动机器人开始使用了！"
+            
+            local response2=$(curl -s -X POST "https://api.telegram.org/bot$token/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{
+                    \"chat_id\": \"$chat_id\",
+                    \"text\": \"$simple_message\"
+                }" 2>/dev/null)
+            
+            if echo "$response2" | grep -q '"ok":true'; then
+                return 0
+            fi
+        fi
+    fi
+    
+    return 1
+}
+
 # 完整的配置验证函数
 validate_configuration() {
     local config_valid=true
@@ -1638,6 +1744,44 @@ validate_configuration() {
             print_message $CYAN "👥 配置了 $admin_count 个管理员"
             ;;
     esac
+    
+    # 实际发送测试消息验证
+    if [ "$config_valid" = true ]; then
+        echo
+        print_message $BLUE "📤 发送实际测试消息..."
+        print_message $YELLOW "💡 请检查您的Telegram以确认收到测试消息"
+        
+        # 获取第一个Chat ID进行测试
+        local first_chat_id=$(echo "$CHAT_ID" | cut -d',' -f1)
+        
+        if send_test_message "$BOT_TOKEN" "$first_chat_id"; then
+            print_message $GREEN "✅ 测试消息发送成功！"
+            print_message $CYAN "📱 请检查您的Telegram应用，应该收到了一条测试消息"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Test message sent successfully to $first_chat_id" >> "$validation_log"
+            
+            # 如果有多个管理员，提示
+            if [ $admin_count -gt 1 ]; then
+                print_message $CYAN "💡 测试消息已发送到第一个管理员 ($first_chat_id)"
+                print_message $CYAN "💡 启动机器人后，所有 $admin_count 个管理员都将能够使用"
+            fi
+        else
+            print_message $YELLOW "⚠️ 测试消息发送失败"
+            print_message $YELLOW "💡 可能原因："
+            print_message $CYAN "   • Chat ID 不正确"
+            print_message $CYAN "   • 您需要先向机器人发送 /start 命令"
+            print_message $CYAN "   • 网络连接问题"
+            print_message $CYAN "   • Bot Token 权限不足"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Test message failed to $first_chat_id" >> "$validation_log"
+            
+            # 提供解决建议
+            echo
+            print_message $BLUE "🔧 建议解决步骤："
+            print_message $CYAN "1. 在Telegram中搜索您的机器人"
+            print_message $CYAN "2. 点击 'START' 或发送 /start 命令"
+            print_message $CYAN "3. 然后重新运行验证测试"
+        fi
+        echo
+    fi
     
     # 检查Python环境
     print_message $YELLOW "🐍 验证 Python 环境..."
@@ -2496,7 +2640,16 @@ start_bot_silent() {
     local venv_dir="$PROJECT_DIR/venv"
     if [ -d "$venv_dir" ]; then
         source "$venv_dir/bin/activate"
-        PYTHON_CMD="$venv_dir/bin/python"
+        # 验证并设置正确的Python命令
+        if [ -x "$venv_dir/bin/python" ]; then
+            PYTHON_CMD="$venv_dir/bin/python"
+        elif [ -x "$venv_dir/bin/python3" ]; then
+            PYTHON_CMD="$venv_dir/bin/python3"
+        elif command -v python &> /dev/null; then
+            PYTHON_CMD="python"
+        else
+            PYTHON_CMD="python3"
+        fi
     fi
     
     # 清理旧进程
@@ -3574,9 +3727,22 @@ check_and_activate_venv() {
             
             if [ -n "$VIRTUAL_ENV" ]; then
                 print_message $GREEN "✅ 虚拟环境已激活: $(basename "$VIRTUAL_ENV")"
-                # 更新Python命令
-                PYTHON_CMD="$venv_dir/bin/python"
-                PIP_CMD="$venv_dir/bin/pip"
+                # 更新Python命令 - 验证文件是否存在
+                if [ -x "$venv_dir/bin/python" ]; then
+                    PYTHON_CMD="$venv_dir/bin/python"
+                elif [ -x "$venv_dir/bin/python3" ]; then
+                    PYTHON_CMD="$venv_dir/bin/python3"
+                elif command -v python &> /dev/null; then
+                    PYTHON_CMD="python"
+                else
+                    PYTHON_CMD="python3"
+                fi
+                
+                if [ -x "$venv_dir/bin/pip" ]; then
+                    PIP_CMD="$venv_dir/bin/pip"
+                else
+                    PIP_CMD="$PYTHON_CMD -m pip"
+                fi
             else
                 print_message $RED "❌ 虚拟环境激活失败"
                 exit 1
@@ -3601,8 +3767,22 @@ check_and_activate_venv() {
                 pip install -r requirements.txt
                 pip install schedule psutil
                 
-                PYTHON_CMD="$venv_dir/bin/python"
-                PIP_CMD="$venv_dir/bin/pip"
+                # 验证并设置正确的Python命令
+                if [ -x "$venv_dir/bin/python" ]; then
+                    PYTHON_CMD="$venv_dir/bin/python"
+                elif [ -x "$venv_dir/bin/python3" ]; then
+                    PYTHON_CMD="$venv_dir/bin/python3"
+                elif command -v python &> /dev/null; then
+                    PYTHON_CMD="python"
+                else
+                    PYTHON_CMD="python3"
+                fi
+                
+                if [ -x "$venv_dir/bin/pip" ]; then
+                    PIP_CMD="$venv_dir/bin/pip"
+                else
+                    PIP_CMD="$PYTHON_CMD -m pip"
+                fi
             else
                 print_message $RED "❌ 虚拟环境创建失败"
                 print_message $YELLOW "请重新运行安装脚本"

@@ -1130,7 +1130,7 @@ Type=forking
 User=root
 WorkingDirectory=$project_dir
 Environment=PATH=$project_dir/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python bot.py > bot.log 2>&1 & echo \$! > bot.pid'
+ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python3 bot.py > bot.log 2>&1 & echo \$! > bot.pid'
 ExecStop=/bin/bash -c 'if [ -f $project_dir/bot.pid ]; then kill \$(cat $project_dir/bot.pid); rm -f $project_dir/bot.pid; fi'
 Restart=always
 RestartSec=10
@@ -2064,8 +2064,13 @@ auto_update_project() {
     # 重启服务
     print_message $CYAN "🚀 重启服务..."
     if [ -f "start.sh" ]; then
-        # 重新启动机器人
-        nohup python bot.py > bot.log 2>&1 &
+        # 重新启动机器人 - 使用正确的Python命令
+        local python_cmd="python3"
+        if [ -d "venv" ]; then
+            source venv/bin/activate
+            python_cmd="python"
+        fi
+        nohup $python_cmd bot.py > bot.log 2>&1 &
         echo $! > bot.pid
         sleep 2
         

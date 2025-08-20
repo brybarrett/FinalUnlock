@@ -615,9 +615,43 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 主程序
 # 修复第600-610行的run_polling调用
+def cleanup_existing_instances():
+    """清理可能存在的其他机器人实例"""
+    import psutil
+    
+    current_pid = os.getpid()
+    current_script = os.path.abspath(__file__)
+    
+    try:
+        # 查找所有运行bot.py的进程
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['pid'] == current_pid:
+                    continue
+                    
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if 'bot.py' in cmdline and current_script in cmdline:
+                    logger.warning(f"发现其他bot实例 (PID: {proc.info['pid']})，正在终止...")
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                        logger.info(f"已终止重复实例 (PID: {proc.info['pid']})")
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        logger.info(f"强制终止重复实例 (PID: {proc.info['pid']})")
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+                
+    except Exception as e:
+        logger.warning(f"清理其他实例时出错: {e}")
+
 if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
+        
+        # 清理可能存在的其他实例
+        cleanup_existing_instances()
         
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
@@ -654,11 +688,12 @@ if __name__ == '__main__':
         logger.info('机器人启动成功，开始轮询...')
         print('Bot 运行中...')
         
-        # 🔧 修复：使用兼容v20.0+的参数
+        # 🔧 修复：使用兼容v20.0+的参数，增加冲突处理
         app.run_polling(
             drop_pending_updates=True,
             timeout=30,
-            bootstrap_retries=3
+            bootstrap_retries=3,
+            close_loop=False  # 避免事件循环冲突
         )
         
     except KeyboardInterrupt:
