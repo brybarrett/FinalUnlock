@@ -617,12 +617,12 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 修复第600-610行的run_polling调用
 def cleanup_existing_instances():
     """清理可能存在的其他机器人实例"""
-    import psutil
-    
-    current_pid = os.getpid()
-    current_script = os.path.abspath(__file__)
-    
     try:
+        import psutil
+        
+        current_pid = os.getpid()
+        current_script = os.path.abspath(__file__)
+        
         # 查找所有运行bot.py的进程
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
@@ -643,6 +643,72 @@ def cleanup_existing_instances():
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
                 
+    except ImportError:
+        logger.info("psutil 模块未安装，尝试自动安装...")
+        
+        # 尝试自动安装psutil
+        try:
+            import subprocess
+            import sys
+            
+            # 尝试安装psutil
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'psutil>=5.8.0'])
+            logger.info("✅ psutil 安装成功，重新尝试进程清理...")
+            
+            # 重新导入并执行清理
+            import psutil
+            current_pid = os.getpid()
+            current_script = os.path.abspath(__file__)
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['pid'] == current_pid:
+                        continue
+                        
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'bot.py' in cmdline and current_script in cmdline:
+                        logger.warning(f"发现其他bot实例 (PID: {proc.info['pid']})，正在终止...")
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                            logger.info(f"已终止重复实例 (PID: {proc.info['pid']})")
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+                            logger.info(f"强制终止重复实例 (PID: {proc.info['pid']})")
+                            
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                    
+        except Exception as install_error:
+            logger.info(f"自动安装psutil失败: {install_error}")
+            logger.info("💡 请手动运行: pip install psutil")
+        
+        # 如果自动安装也失败，使用基本的系统命令作为后备方案
+        try:
+            if 'subprocess' not in locals():
+                import subprocess
+            import signal
+            
+            # 尝试使用系统命令查找进程
+            result = subprocess.run(['pgrep', '-f', 'python.*bot.py'], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                current_pid = str(os.getpid())
+                
+                for pid in pids:
+                    if pid.strip() and pid.strip() != current_pid:
+                        try:
+                            os.kill(int(pid), signal.SIGTERM)
+                            logger.info(f"已终止进程 PID: {pid}")
+                        except (ProcessLookupError, PermissionError, ValueError):
+                            pass
+                            
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            logger.info(f"基本进程清理也失败: {e}")
+            logger.info("将依赖启动脚本进行进程清理")
+        
     except Exception as e:
         logger.warning(f"清理其他实例时出错: {e}")
 
