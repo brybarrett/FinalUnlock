@@ -422,7 +422,7 @@ EOF
     fi
 }
 
-# 修改主安装流程，移除配置部分
+# 修改主安装流程，完全移除配置部分
 main_installation() {
     # 1. 检查Python和虚拟环境支持
     check_python_and_venv
@@ -440,10 +440,42 @@ main_installation() {
     create_startup_commands
     
     print_message $GREEN "✅ 安装完成！"
-    print_message $YELLOW "💡 请使用一键安装脚本来配置Bot Token和Chat ID"
-    print_message $CYAN "bash <(curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/onekey_install.sh)"
+    print_message $YELLOW "💡 项目已安装，等待配置..."
     
-    print_message $GREEN "🎉 项目安装完成，等待配置..."
+    # 不再有配置逻辑，由onekey_install.sh处理
+}
+
+# 修改依赖安装函数，静默安装
+auto_install_system_dependencies() {
+    print_message $BLUE "📦 检查系统依赖..."
+    
+    # 检查缺失的包
+    local missing_packages=()
+    local packages=("python3" "python3-pip" "python3-venv" "python3-dev" "python3-dev" "git" "curl")
+    
+    for package in "${packages[@]}"; do
+        if [ "$PKG_MANAGER" = "apt-get" ]; then
+            if ! dpkg -l | grep -q "^ii  $package "; then
+                missing_packages+=("$package")
+            fi
+        fi
+    done
+    
+    if [ ${#missing_packages[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有系统依赖已满足"
+    else
+        print_message $YELLOW "📥 安装缺失依赖: ${missing_packages[*]}"
+        
+        # 静默更新包列表
+        sudo $PKG_UPDATE > /dev/null 2>&1
+        
+        # 静默安装缺失的包
+        for package in "${missing_packages[@]}"; do
+            sudo $PKG_INSTALL $package > /dev/null 2>&1
+        done
+        
+        print_message $GREEN "✅ 依赖安装完成"
+    fi
 }
 
 # 执行主安装流程

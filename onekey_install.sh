@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# FinalShell 激活码机器人一键安装命令 v5.0
-# 修复逻辑
+# FinalShell 激活码机器人一键安装命令 v6.0
+# 完美版本 - 静默安装 + 自动清理 + 用户配置
 
 # 颜色定义
 RED='\033[0;31m'
@@ -23,18 +23,18 @@ print_message() {
 clear
 echo -e "${PURPLE}================================${NC}"
 echo -e "${PURPLE}  FinalShell 激活码机器人一键安装${NC}"
-echo -e "${PURPLE}     修复版本 v5.0${NC}"
+echo -e "${PURPLE}     完美版本 v6.0${NC}"
 echo -e "${PURPLE}================================${NC}"
 echo -e "${CYAN}项目地址: https://github.com/xymn2023/FinalUnlock${NC}"
-echo -e "${CYAN}先下载项目，再配置信息${NC}"
+echo -e "${CYAN}静默安装 + 自动清理 + 智能配置${NC}"
 echo
 
 # ==========================================
-# 第一步：系统环境检查
+# 第一步：预检查和清理
 # ==========================================
 
-check_system() {
-    print_message $BLUE "🔍 第一步：系统环境检查..."
+precheck_and_cleanup() {
+    print_message $BLUE "🔍 第一步：系统预检查和清理..."
     
     # 检查操作系统
     if [[ "$OSTYPE" != "linux-gnu"* ]]; then
@@ -43,76 +43,129 @@ check_system() {
     fi
     
     # 检查网络连接
+    print_message $YELLOW "🌐 检查网络连接..."
     if ! ping -c 1 -W 3 github.com > /dev/null 2>&1; then
         print_message $RED "❌ 网络连接失败，请检查网络设置"
         exit 1
     fi
+    print_message $GREEN "✅ 网络连接正常"
     
-    # 确保有下载工具
-    if ! command -v curl &> /dev/null; then
-        print_message $YELLOW "⚠️ 安装curl..."
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y curl
-        elif command -v yum &> /dev/null; then
-            sudo yum install -y curl
+    # 检查并清理现有安装
+    local install_dirs=("/usr/local/FinalUnlock" "$HOME/FinalUnlock")
+    for dir in "${install_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            print_message $YELLOW "🗑️ 检测到现有安装目录: $dir"
+            print_message $BLUE "🔄 自动清理现有安装..."
+            
+            # 停止可能运行的进程
+            if [ -f "$dir/bot.pid" ]; then
+                local pid=$(cat "$dir/bot.pid" 2>/dev/null)
+                if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+                    print_message $YELLOW "⏹️ 停止运行中的机器人..."
+                    kill $pid 2>/dev/null
+                    sleep 2
+                fi
+            fi
+            
+            if [ -f "$dir/guard.pid" ]; then
+                local guard_pid=$(cat "$dir/guard.pid" 2>/dev/null)
+                if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+                    print_message $YELLOW "⏹️ 停止运行中的Guard..."
+                    kill $guard_pid 2>/dev/null
+                    sleep 2
+                fi
+            fi
+            
+            # 删除目录
+            rm -rf "$dir"
+            print_message $GREEN "✅ 已清理: $dir"
         fi
+    done
+    
+    # 清理全局命令
+    if [ -f "/usr/local/bin/fn-bot" ]; then
+        print_message $YELLOW "🗑️ 清理现有全局命令..."
+        sudo rm -f /usr/local/bin/fn-bot
+        print_message $GREEN "✅ 已清理全局命令"
     fi
     
-    print_message $GREEN "✅ 系统检查通过"
+    print_message $GREEN "✅ 预检查和清理完成"
     echo
 }
 
 # ==========================================
-# 第二步：下载并执行安装脚本
+# 第二步：静默安装系统依赖
+# ==========================================
+
+silent_install_dependencies() {
+    print_message $BLUE "📦 第二步：检查系统依赖..."
+    
+    # 检查必要工具
+    local missing_tools=()
+    local tools=("curl" "git" "python3" "pip3")
+    
+    for tool in "${tools[@]}"; do
+        if ! command -v $tool &> /dev/null; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    # 检查Python模块
+    if ! python3 -c "import venv" 2>/dev/null; then
+        missing_tools+=("python3-venv")
+    fi
+    
+    if [ ${#missing_tools[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有系统依赖已满足"
+    else
+        print_message $YELLOW "📥 安装缺失的依赖: ${missing_tools[*]}"
+        
+        # 静默安装缺失的依赖
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update -qq > /dev/null 2>&1
+            for tool in "${missing_tools[@]}"; do
+                case $tool in
+                    "pip3") sudo apt-get install -qq -y python3-pip > /dev/null 2>&1 ;;
+                    "python3-venv") sudo apt-get install -qq -y python3-venv > /dev/null 2>&1 ;;
+                    *) sudo apt-get install -qq -y $tool > /dev/null 2>&1 ;;
+                esac
+            done
+        elif command -v yum &> /dev/null; then
+            for tool in "${missing_tools[@]}"; do
+                sudo yum install -y $tool > /dev/null 2>&1
+            done
+        fi
+        
+        print_message $GREEN "✅ 依赖安装完成"
+    fi
+    
+    echo
+}
+
+# ==========================================
+# 第三步：下载并执行安装
 # ==========================================
 
 download_and_install() {
-    print_message $BLUE "📥 第二步：下载安装脚本..."
+    print_message $BLUE "📥 第三步：下载最新版本并安装..."
     
     # 创建临时目录
     TEMP_DIR=$(mktemp -d)
-    print_message $BLUE "📁 创建临时目录: $TEMP_DIR"
     
-    # 下载install.sh
-    local download_urls=(
-        "https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/install.sh"
-        "https://github.com/xymn2023/FinalUnlock/raw/main/install.sh"
-    )
-    
-    local download_success=false
-    for url in "${download_urls[@]}"; do
-        print_message $YELLOW "🔄 尝试从 $url 下载..."
-        if curl -s -L "$url" -o "$TEMP_DIR/install.sh" 2>/dev/null; then
-            if [ -f "$TEMP_DIR/install.sh" ] && [ -s "$TEMP_DIR/install.sh" ]; then
-                download_success=true
-                print_message $GREEN "✅ 下载成功"
-                break
-            fi
-        fi
-        print_message $YELLOW "⚠️ 下载失败，尝试下一个源..."
-    done
-    
-    if [ "$download_success" = "false" ]; then
-        print_message $RED "❌ 所有下载源都失败"
+    # 下载最新的install.sh
+    print_message $YELLOW "🔄 下载最新安装脚本..."
+    if ! curl -s -L "https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/install.sh" -o "$TEMP_DIR/install.sh"; then
+        print_message $RED "❌ 下载失败"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
     
     chmod +x "$TEMP_DIR/install.sh"
-    print_message $GREEN "✅ 安装脚本下载完成"
-    echo
-}
-
-# ==========================================
-# 第三步：执行安装（项目会被下载）
-# ==========================================
-
-execute_installation() {
-    print_message $BLUE "🚀 第三步：执行项目安装..."
-    print_message $YELLOW "💡 项目将被自动下载到系统中"
+    print_message $GREEN "✅ 最新安装脚本下载完成"
     
-    # 执行安装脚本（这会下载项目）
-    if "$TEMP_DIR/install.sh"; then
+    # 执行安装（静默模式）
+    print_message $YELLOW "🚀 执行项目安装..."
+    if "$TEMP_DIR/install.sh" > /dev/null 2>&1; then
         print_message $GREEN "✅ 项目安装完成"
     else
         print_message $RED "❌ 项目安装失败"
@@ -121,15 +174,14 @@ execute_installation() {
     fi
     
     rm -rf "$TEMP_DIR"
-    print_message $GREEN "✅ 安装脚本执行完成"
     echo
 }
 
 # ==========================================
-# 第四步：配置Bot Token和Chat ID
+# 第四步：用户配置收集
 # ==========================================
 
-configure_bot_credentials() {
+collect_user_configuration() {
     print_message $BLUE "⚙️ 第四步：配置Bot Token和Chat ID..."
     
     # 查找项目安装目录
@@ -146,25 +198,21 @@ configure_bot_credentials() {
         exit 1
     fi
     
-    print_message $GREEN "✅ 找到项目目录: $project_dir"
+    print_message $GREEN "✅ 项目目录: $project_dir"
     cd "$project_dir"
     
-    # 现在可以安全地配置，因为项目已经下载
-    print_message $YELLOW "💡 现在开始配置Bot Token和Chat ID"
-    print_message $CYAN "📖 如果您还没有准备好，请按以下步骤获取："
+    # 显示配置指南
+    print_message $CYAN "📖 配置指南:"
     echo
-    
-    print_message $CYAN "🤖 获取Bot Token:"
-    print_message $CYAN "   1. 在Telegram中搜索 @BotFather"
-    print_message $CYAN "   2. 发送 /newbot 创建新机器人"
-    print_message $CYAN "   3. 按提示设置机器人名称和用户名"
-    print_message $CYAN "   4. 复制获得的Token（格式: 123456789:ABCdefGHI...）"
+    print_message $CYAN "🤖 Bot Token获取:"
+    print_message $CYAN "   1. Telegram搜索 @BotFather → 发送 /newbot"
+    print_message $CYAN "   2. 设置机器人名称 → 复制Token"
+    print_message $CYAN "   3. 格式: 123456789:ABCdefGHI..."
     echo
-    
-    print_message $CYAN "👤 获取Chat ID:"
-    print_message $CYAN "   1. 在Telegram中搜索 @userinfobot"
-    print_message $CYAN "   2. 发送任意消息获取您的用户ID"
-    print_message $CYAN "   3. 复制显示的数字ID"
+    print_message $CYAN "👤 Chat ID获取:"
+    print_message $CYAN "   1. Telegram搜索 @userinfobot → 发送消息"
+    print_message $CYAN "   2. 复制显示的数字ID"
+    print_message $CYAN "   3. 格式: 123456789"
     echo
     
     read -p "准备好后按回车键开始配置..." -r
@@ -173,31 +221,29 @@ configure_bot_credentials() {
     # 收集Bot Token
     local bot_token=""
     while true; do
-        print_message $BLUE "🤖 请输入您的Telegram Bot Token:"
+        print_message $BLUE "🤖 请输入Telegram Bot Token:"
         read -p "Bot Token: " bot_token
         
         if [ -z "$bot_token" ]; then
-            print_message $RED "❌ Bot Token不能为空，请重新输入"
+            print_message $RED "❌ 不能为空，请重新输入"
             continue
         fi
         
-        # 验证Token格式
+        # 验证格式
         if [[ ! "$bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]{35,}$ ]]; then
-            print_message $RED "❌ Bot Token格式不正确"
-            print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+            print_message $RED "❌ 格式不正确"
+            print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHI..."
             continue
         fi
         
-        print_message $GREEN "✅ Bot Token格式正确"
-        
-        # 在线验证Token
-        print_message $YELLOW "🌐 验证Bot Token有效性..."
+        # 在线验证
+        print_message $YELLOW "🌐 验证Token有效性..."
         if curl -s "https://api.telegram.org/bot$bot_token/getMe" | grep -q '"ok":true'; then
-            print_message $GREEN "✅ Bot Token验证成功！"
+            print_message $GREEN "✅ Token验证成功！"
             break
         else
-            print_message $YELLOW "⚠️ Bot Token验证失败"
-            read -p "是否继续使用此Token? (y/N): " -n 1 -r
+            print_message $YELLOW "⚠️ Token验证失败"
+            read -p "是否继续使用? (y/N): " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 break
@@ -208,17 +254,17 @@ configure_bot_credentials() {
     # 收集Chat ID
     local chat_id=""
     while true; do
-        print_message $BLUE "👤 请输入您的Telegram Chat ID:"
+        print_message $BLUE "👤 请输入Telegram Chat ID:"
         read -p "Chat ID: " chat_id
         
         if [ -z "$chat_id" ]; then
-            print_message $RED "❌ Chat ID不能为空，请重新输入"
+            print_message $RED "❌ 不能为空，请重新输入"
             continue
         fi
         
-        # 验证Chat ID格式
+        # 验证格式
         if [[ ! "$chat_id" =~ ^[0-9]+([,][0-9]+)*$ ]]; then
-            print_message $RED "❌ Chat ID格式不正确"
+            print_message $RED "❌ 格式不正确"
             print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
             continue
         fi
@@ -227,9 +273,9 @@ configure_bot_credentials() {
         break
     done
     
-    # 最终确认
+    # 确认配置
     echo
-    print_message $BLUE "📋 配置信息确认:"
+    print_message $BLUE "📋 配置确认:"
     print_message $CYAN "Bot Token: ${bot_token:0:20}..."
     print_message $CYAN "Chat ID: $chat_id"
     echo
@@ -241,85 +287,79 @@ configure_bot_credentials() {
         exit 1
     fi
     
-    # 保存配置到.env文件（现在项目已存在）
-    local env_file="$project_dir/.env"
-    cat > "$env_file" << EOF
+    # 保存配置
+    cat > "$project_dir/.env" << EOF
 BOT_TOKEN=$bot_token
 CHAT_ID=$chat_id
 EOF
     
-    print_message $GREEN "✅ 配置已保存到 $env_file"
+    print_message $GREEN "✅ 配置已保存"
     echo
 }
 
 # ==========================================
-# 第五步：启动Guard守护程序
+# 第五步：启动服务
 # ==========================================
 
-setup_guard() {
-    print_message $BLUE "🛡️ 第五步：配置Guard守护系统..."
+start_services() {
+    print_message $BLUE "🚀 第五步：启动服务..."
     
     # 查找项目目录
     local project_dir=""
     for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock"; do
-        if [ -d "$dir" ] && [ -f "$dir/guard.py" ]; then
+        if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
             project_dir="$dir"
             break
         fi
     done
     
     if [ -z "$project_dir" ]; then
-        print_message $YELLOW "⚠️ 未找到项目目录，跳过Guard配置"
-        return
+        print_message $RED "❌ 未找到配置完成的项目目录"
+        exit 1
     fi
     
     cd "$project_dir"
     
-    # 启动Guard（配置已存在）
-    if [ -f ".env" ]; then
-        local python_cmd="python3"
-        if [ -d "venv" ]; then
-            source venv/bin/activate
-            python_cmd="python"
-        fi
-        
-        # 启动Guard守护程序
-        print_message $YELLOW "🔄 启动Guard守护程序..."
-        nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &
-        local guard_pid=$!
-        
-        if [ -n "$guard_pid" ]; then
-            echo $guard_pid > guard.pid
-            sleep 3
-            if ps -p $guard_pid > /dev/null 2>&1; then
-                print_message $GREEN "✅ Guard守护程序已启动 (PID: $guard_pid)"
-                
-                # 发送初始报告
-                print_message $BLUE "📤 发送初始自检报告..."
-                sleep 5
-                if $python_cmd guard.py initial 2>/dev/null; then
-                    print_message $GREEN "✅ 初始自检报告已发送到Telegram"
-                else
-                    print_message $YELLOW "⚠️ 初始报告发送失败，但Guard正常运行"
-                fi
-            else
-                print_message $YELLOW "⚠️ Guard启动失败，但不影响机器人使用"
-                rm -f guard.pid
-            fi
-        fi
-    else
-        print_message $RED "❌ 配置文件不存在，无法启动Guard"
+    # 启动Guard守护程序
+    local python_cmd="python3"
+    if [ -d "venv" ]; then
+        source venv/bin/activate
+        python_cmd="python"
     fi
     
-    print_message $GREEN "✅ Guard系统配置完成"
+    print_message $YELLOW "🛡️ 启动Guard守护程序..."
+    nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &
+    local guard_pid=$!
+    
+    if [ -n "$guard_pid" ]; then
+        echo $guard_pid > guard.pid
+        sleep 3
+        if ps -p $guard_pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ Guard守护程序已启动 (PID: $guard_pid)"
+        else
+            print_message $YELLOW "⚠️ Guard启动失败，但不影响使用"
+            rm -f guard.pid
+        fi
+    fi
+    
+    # 发送初始报告
+    print_message $YELLOW "📤 发送初始自检报告..."
+    sleep 5
+    if $python_cmd guard.py initial 2>/dev/null; then
+        print_message $GREEN "✅ 初始报告已发送到Telegram"
+    else
+        print_message $YELLOW "⚠️ 初始报告发送失败"
+    fi
+    
+    print_message $GREEN "✅ 服务启动完成"
     echo
 }
 
 # ==========================================
-# 第六步：显示安装结果
+# 第六步：显示完成信息
 # ==========================================
 
-show_final_result() {
+show_completion() {
     echo
     print_message $PURPLE "================================${NC}"
     print_message $PURPLE "   🎉 安装完成！ 🎉${NC}"
@@ -327,19 +367,23 @@ show_final_result() {
     echo
     
     print_message $GREEN "✅ FinalShell激活码机器人已就绪"
-    print_message $GREEN "✅ Bot Token和Chat ID已配置"
+    print_message $GREEN "✅ 配置已完成，无需重复输入"
     print_message $GREEN "✅ Guard守护系统已启动"
     echo
     
     print_message $BLUE "📱 使用方法:"
     print_message $CYAN "  • 管理机器人: fn-bot"
-    print_message $CYAN "  • Telegram命令: /start, /help"
+    print_message $CYAN "  • Telegram命令: /start, /help, /guard"
     print_message $CYAN "  • 发送机器码获取激活码"
-    print_message $CYAN "  • 发送 /guard 获取系统报告"
     echo
     
-    print_message $YELLOW "💡 配置已保存，后续无需重复输入！"
-    print_message $CYAN "⏰ 自动功能: 每天00:00自检，07:00发送报告"
+    print_message $YELLOW "⏰ 自动功能:"
+    print_message $CYAN "  • 每天 00:00 - 系统自检"
+    print_message $CYAN "  • 每天 07:00 - 发送报告"
+    print_message $CYAN "  • 随时可用 - /guard 获取报告"
+    echo
+    
+    print_message $GREEN "🚀 现在可以开始使用了！"
 }
 
 # ==========================================
@@ -347,23 +391,23 @@ show_final_result() {
 # ==========================================
 
 main() {
-    # 第一步：系统环境检查
-    check_system
+    # 第一步：预检查和清理
+    precheck_and_cleanup
     
-    # 第二步：下载安装脚本
+    # 第二步：静默安装依赖
+    silent_install_dependencies
+    
+    # 第三步：下载并安装
     download_and_install
     
-    # 第三步：执行安装（下载项目）
-    execute_installation
+    # 第四步：用户配置
+    collect_user_configuration
     
-    # 第四步：配置Bot凭据（项目已存在）
-    configure_bot_credentials
+    # 第五步：启动服务
+    start_services
     
-    # 第五步：设置Guard系统
-    setup_guard
-    
-    # 第六步：显示结果
-    show_final_result
+    # 第六步：显示完成
+    show_completion
 }
 
 # 执行主流程
