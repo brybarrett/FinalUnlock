@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# FinalShell 激活码机器人一键安装命令 v6.1
-# 完美版本 - 静默安装 + 自动清理 + 用户配置 + 修复版
+# FinalShell 激活码机器人一键安装命令 v7.0
+# 完美版本 - 静默安装 + 自动清理 + 用户配置 + 自动启动 + 开机自启 + 管理菜单
 
 # 颜色定义
 RED='\033[0;31m'
@@ -23,10 +23,10 @@ print_message() {
 clear
 echo -e "${PURPLE}================================${NC}"
 echo -e "${PURPLE}  FinalShell 激活码机器人一键安装${NC}"
-echo -e "${PURPLE}     完美版本 v6.1${NC}"
+echo -e "${PURPLE}     完美版本 v7.0${NC}"
 echo -e "${PURPLE}================================${NC}"
 echo -e "${CYAN}项目地址: https://github.com/xymn2023/FinalUnlock${NC}"
-echo -e "${CYAN}静默安装 + 自动清理 + 智能配置${NC}"
+echo -e "${CYAN}静默安装 + 自动清理 + 智能配置 + 自动启动${NC}"
 echo
 
 # ==========================================
@@ -50,8 +50,15 @@ precheck_and_cleanup() {
     fi
     print_message $GREEN "✅ 网络连接正常"
     
+    # 停止现有服务
+    if systemctl is-active finalunlock-bot.service >/dev/null 2>&1; then
+        print_message $YELLOW "🛑 停止现有系统服务..."
+        sudo systemctl stop finalunlock-bot.service
+        sudo systemctl disable finalunlock-bot.service
+    fi
+    
     # 检查并清理现有安装
-    local install_dirs=("/usr/local/FinalUnlock" "$HOME/FinalUnlock")
+    local install_dirs=("/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock")
     for dir in "${install_dirs[@]}"; do
         if [ -d "$dir" ]; then
             print_message $YELLOW "🗑️ 检测到现有安装目录: $dir"
@@ -207,6 +214,9 @@ manual_installation_fallback() {
     
     cd "$install_dir"
     
+    # 设置权限
+    chmod +x *.sh 2>/dev/null || true
+    
     # 创建虚拟环境
     print_message $BLUE "🐍 创建虚拟环境..."
     if python3 -m venv venv; then
@@ -297,10 +307,9 @@ download_and_install() {
 }
 
 # ==========================================
-# 第四步：用户配置收集
+# 第四步：用户配置收集（增强版）
 # ==========================================
 
-# 修复collect_user_configuration函数中的目录检测
 collect_user_configuration() {
     print_message $BLUE "⚙️ 第四步：配置Bot Token和Chat ID..."
     
@@ -373,7 +382,6 @@ collect_user_configuration() {
     print_message $CYAN "📋 项目目录内容:"
     ls -la "$project_dir" | head -10
     
-    # 其余配置逻辑保持不变...
     # 显示配置指南
     print_message $CYAN "📖 配置指南:"
     echo
@@ -475,11 +483,11 @@ EOF
 # ==========================================
 
 start_services() {
-    print_message $BLUE "🚀 第五步：启动服务..."
+    print_message $BLUE "🚀 第五步：启动Guard守护服务..."
     
     # 查找项目目录
     local project_dir=""
-    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock"; do
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
         if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
             project_dir="$dir"
             break
@@ -524,82 +532,14 @@ start_services() {
         print_message $YELLOW "⚠️ 初始报告发送失败"
     fi
     
-    print_message $GREEN "✅ 服务启动完成"
+    print_message $GREEN "✅ Guard服务启动完成"
     echo
 }
 
 # ==========================================
-# 第六步：显示完成信息
+# 🆕 第六步：自动启动机器人
 # ==========================================
 
-show_completion() {
-    echo
-    print_message $PURPLE "================================${NC}"
-    print_message $PURPLE "   🎉 安装完成！ 🎉${NC}"
-    print_message $PURPLE "================================${NC}"
-    echo
-    
-    print_message $GREEN "✅ FinalShell激活码机器人已就绪"
-    print_message $GREEN "✅ 配置已完成，无需重复输入"
-    print_message $GREEN "✅ Guard守护系统已启动"
-    echo
-    
-    print_message $BLUE "📱 使用方法:"
-    print_message $CYAN "  • 管理机器人: fn-bot"
-    print_message $CYAN "  • Telegram命令: /start, /help, /guard"
-    print_message $CYAN "  • 发送机器码获取激活码"
-    echo
-    
-    print_message $YELLOW "⏰ 自动功能:"
-    print_message $CYAN "  • 每天 00:00 - 系统自检"
-    print_message $CYAN "  • 每天 07:00 - 发送报告"
-    print_message $CYAN "  • 随时可用 - /guard 获取报告"
-    echo
-    
-    print_message $GREEN "🚀 现在可以开始使用了！"
-}
-
-# ==========================================
-# 主执行流程
-# ==========================================
-
-# 在main函数中添加自动启动和开机自启
-main() {
-    # 第一步：预检查和清理
-    precheck_and_cleanup
-    
-    # 第二步：静默安装依赖
-    silent_install_dependencies
-    
-    # 新增：详细系统诊断
-    if ! detailed_system_check; then
-        print_message $RED "❌ 系统诊断发现问题，请解决后重试"
-        exit 1
-    fi
-    
-    # 第三步：下载并安装
-    download_and_install
-    
-    # 第四步：用户配置
-    collect_user_configuration
-    
-    # 第五步：启动服务
-    start_services
-    
-    # 🆕 第六步：自动启动机器人
-    auto_start_bot
-    
-    # 🆕 第七步：设置开机自启
-    setup_autostart
-    
-    # 第八步：显示完成
-    show_completion
-    
-    # 🆕 第九步：显示管理菜单（不自动退出）
-    show_management_menu
-}
-
-# 新增：自动启动机器人函数
 auto_start_bot() {
     print_message $BLUE "🚀 第六步：自动启动机器人..."
     
@@ -649,7 +589,10 @@ auto_start_bot() {
     fi
 }
 
-# 新增：设置开机自启函数
+# ==========================================
+# 🆕 第七步：设置开机自启
+# ==========================================
+
 setup_autostart() {
     print_message $BLUE "⚙️ 第七步：设置开机自启..."
     
@@ -671,11 +614,13 @@ setup_autostart() {
     local service_content="[Unit]
 Description=FinalUnlock Telegram Bot
 After=network.target
+Wants=network.target
 
 [Service]
 Type=forking
 User=root
 WorkingDirectory=$project_dir
+Environment=PATH=$project_dir/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python bot.py > bot.log 2>&1 & echo \$! > bot.pid'
 ExecStop=/bin/bash -c 'if [ -f $project_dir/bot.pid ]; then kill \$(cat $project_dir/bot.pid); rm -f $project_dir/bot.pid; fi'
 Restart=always
@@ -695,9 +640,48 @@ WantedBy=multi-user.target"
     else
         print_message $YELLOW "⚠️ 开机自启设置失败"
     fi
+    
+    echo
 }
 
-# 新增：管理菜单（防止自动退出）
+# ==========================================
+# 第八步：显示完成信息
+# ==========================================
+
+show_completion() {
+    echo
+    print_message $PURPLE "================================${NC}"
+    print_message $PURPLE "   🎉 安装完成！ 🎉${NC}"
+    print_message $PURPLE "================================${NC}"
+    echo
+    
+    print_message $GREEN "✅ FinalShell激活码机器人已就绪"
+    print_message $GREEN "✅ 配置已完成，无需重复输入"
+    print_message $GREEN "✅ Guard守护系统已启动"
+    print_message $GREEN "✅ 机器人已自动启动"
+    print_message $GREEN "✅ 开机自启已设置"
+    echo
+    
+    print_message $BLUE "📱 使用方法:"
+    print_message $CYAN "  • 管理机器人: fn-bot"
+    print_message $CYAN "  • Telegram命令: /start, /help, /guard"
+    print_message $CYAN "  • 发送机器码获取激活码"
+    echo
+    
+    print_message $YELLOW "⏰ 自动功能:"
+    print_message $CYAN "  • 每天 00:00 - 系统自检"
+    print_message $CYAN "  • 每天 07:00 - 发送报告"
+    print_message $CYAN "  • 随时可用 - /guard 获取报告"
+    print_message $CYAN "  • 开机自启 - 系统重启后自动运行"
+    echo
+    
+    print_message $GREEN "🚀 现在可以开始使用了！"
+}
+
+# ==========================================
+# 🆕 第九步：管理菜单（防止自动退出）
+# ==========================================
+
 show_management_menu() {
     while true; do
         echo
@@ -708,22 +692,45 @@ show_management_menu() {
         
         # 检查机器人状态
         local bot_status="❌ 未运行"
+        local guard_status="❌ 未运行"
         local project_dir=""
+        
         for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
-            if [ -d "$dir" ] && [ -f "$dir/bot.pid" ]; then
+            if [ -d "$dir" ]; then
                 project_dir="$dir"
-                local pid=$(cat "$dir/bot.pid" 2>/dev/null)
-                if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-                    bot_status="✅ 运行中 (PID: $pid)"
+                
+                # 检查机器人状态
+                if [ -f "$dir/bot.pid" ]; then
+                    local pid=$(cat "$dir/bot.pid" 2>/dev/null)
+                    if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+                        bot_status="✅ 运行中 (PID: $pid)"
+                    fi
+                fi
+                
+                # 检查Guard状态
+                if [ -f "$dir/guard.pid" ]; then
+                    local guard_pid=$(cat "$dir/guard.pid" 2>/dev/null)
+                    if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+                        guard_status="✅ 运行中 (PID: $guard_pid)"
+                    fi
                 fi
                 break
             fi
         done
         
-        print_message $CYAN "当前状态: $bot_status"
+        print_message $CYAN "机器人状态: $bot_status"
+        print_message $CYAN "Guard状态: $guard_status"
         if [ -n "$project_dir" ]; then
             print_message $CYAN "安装目录: $project_dir"
         fi
+        
+        # 检查系统服务状态
+        if systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
+            print_message $CYAN "开机自启: ✅ 已启用"
+        else
+            print_message $CYAN "开机自启: ❌ 未启用"
+        fi
+        
         echo
         
         print_message $BLUE "=== 🤖 机器人管理 ==="
@@ -732,20 +739,35 @@ show_management_menu() {
         print_message $CYAN "[3] 查看运行日志"
         print_message $CYAN "[4] 检查机器人状态"
         echo
+        print_message $BLUE "=== 🛡️ Guard管理 ==="
+        print_message $CYAN "[5] 启动/重启Guard"
+        print_message $CYAN "[6] 停止Guard"
+        print_message $CYAN "[7] 查看Guard日志"
+        echo
         print_message $BLUE "=== ⚙️ 系统管理 ==="
-        print_message $CYAN "[5] 重新配置Bot Token和Chat ID"
-        print_message $CYAN "[6] 测试机器人功能"
-        print_message $CYAN "[7] 查看系统服务状态"
-        print_message $CYAN "[8] 启动完整管理界面"
+        print_message $CYAN "[8] 重新配置Bot Token和Chat ID"
+        print_message $CYAN "[9] 测试机器人功能"
+        print_message $CYAN "[a] 查看系统服务状态"
+        print_message $CYAN "[b] 启动完整管理界面"
+        print_message $CYAN "[c] 设置/重置开机自启"
         echo
         print_message $CYAN "[0] 退出安装程序"
         echo
         
-        read -p "请选择操作 [0-8]: " choice
+        read -p "请选择操作 [0-9,a-c]: " choice
         
         case $choice in
             1)
                 if [ -n "$project_dir" ]; then
+                    cd "$project_dir"
+                    if [ -f "bot.pid" ]; then
+                        local old_pid=$(cat bot.pid)
+                        if ps -p $old_pid > /dev/null 2>&1; then
+                            print_message $YELLOW "🔄 停止现有进程..."
+                            kill $old_pid 2>/dev/null
+                            sleep 2
+                        fi
+                    fi
                     auto_start_bot
                 else
                     print_message $RED "❌ 未找到项目目录"
@@ -790,12 +812,73 @@ show_management_menu() {
             5)
                 if [ -n "$project_dir" ]; then
                     cd "$project_dir"
-                    collect_user_configuration
+                    if [ -f "guard.pid" ]; then
+                        local old_pid=$(cat guard.pid)
+                        if ps -p $old_pid > /dev/null 2>&1; then
+                            print_message $YELLOW "🔄 停止现有Guard进程..."
+                            kill $old_pid 2>/dev/null
+                            sleep 2
+                        fi
+                    fi
+                    
+                    # 启动Guard
+                    local python_cmd="python3"
+                    if [ -d "venv" ]; then
+                        source venv/bin/activate
+                        python_cmd="python"
+                    fi
+                    
+                    nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &
+                    local guard_pid=$!
+                    echo $guard_pid > guard.pid
+                    
+                    sleep 2
+                    if ps -p $guard_pid > /dev/null 2>&1; then
+                        print_message $GREEN "✅ Guard已启动 (PID: $guard_pid)"
+                    else
+                        print_message $RED "❌ Guard启动失败"
+                        rm -f guard.pid
+                    fi
                 else
                     print_message $RED "❌ 未找到项目目录"
                 fi
                 ;;
             6)
+                if [ -n "$project_dir" ] && [ -f "$project_dir/guard.pid" ]; then
+                    local pid=$(cat "$project_dir/guard.pid")
+                    if ps -p $pid > /dev/null 2>&1; then
+                        kill $pid
+                        rm -f "$project_dir/guard.pid"
+                        print_message $GREEN "✅ Guard已停止"
+                    else
+                        print_message $YELLOW "⚠️ Guard未在运行"
+                    fi
+                else
+                    print_message $YELLOW "⚠️ 未找到运行中的Guard"
+                fi
+                ;;
+            7)
+                if [ -n "$project_dir" ]; then
+                    local guard_log="$project_dir/guard_$(date +%Y%m%d).log"
+                    if [ -f "$guard_log" ]; then
+                        print_message $BLUE "📋 Guard日志 (按Ctrl+C退出):"
+                        tail -f "$guard_log"
+                    else
+                        print_message $YELLOW "⚠️ Guard日志文件不存在"
+                    fi
+                else
+                    print_message $RED "❌ 未找到项目目录"
+                fi
+                ;;
+            8)
+                if [ -n "$project_dir" ]; then
+                    cd "$project_dir"
+                    collect_user_configuration
+                else
+                    print_message $RED "❌ 未找到项目目录"
+                fi
+                ;;
+            9)
                 if [ -n "$project_dir" ] && [ -f "$project_dir/.env" ]; then
                     cd "$project_dir"
                     source .env
@@ -813,7 +896,7 @@ show_management_menu() {
                     print_message $RED "❌ 配置文件不存在"
                 fi
                 ;;
-            7)
+            a)
                 print_message $BLUE "📊 系统服务状态:"
                 if systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
                     print_message $GREEN "✅ 开机自启已启用"
@@ -822,7 +905,7 @@ show_management_menu() {
                     print_message $YELLOW "⚠️ 开机自启未启用"
                 fi
                 ;;
-            8)
+            b)
                 if [ -n "$project_dir" ]; then
                     print_message $BLUE "🚀 启动完整管理界面..."
                     cd "$project_dir"
@@ -831,9 +914,13 @@ show_management_menu() {
                     print_message $RED "❌ 未找到项目目录"
                 fi
                 ;;
+            c)
+                setup_autostart
+                ;;
             0)
                 print_message $GREEN "👋 感谢使用FinalUnlock！"
                 print_message $CYAN "💡 使用 'fn-bot' 命令可随时管理机器人"
+                print_message $CYAN "💡 机器人将继续在后台运行"
                 exit 0
                 ;;
             *)
@@ -845,3 +932,45 @@ show_management_menu() {
         read -p "按回车键继续..." -r
     done
 }
+
+# ==========================================
+# 主执行流程
+# ==========================================
+
+main() {
+    # 第一步：预检查和清理
+    precheck_and_cleanup
+    
+    # 第二步：静默安装依赖
+    silent_install_dependencies
+    
+    # 新增：详细系统诊断
+    if ! detailed_system_check; then
+        print_message $RED "❌ 系统诊断发现问题，请解决后重试"
+        exit 1
+    fi
+    
+    # 第三步：下载并安装
+    download_and_install
+    
+    # 第四步：用户配置
+    collect_user_configuration
+    
+    # 第五步：启动服务
+    start_services
+    
+    # 🆕 第六步：自动启动机器人
+    auto_start_bot
+    
+    # 🆕 第七步：设置开机自启
+    setup_autostart
+    
+    # 第八步：显示完成
+    show_completion
+    
+    # 🆕 第九步：显示管理菜单（不自动退出）
+    show_management_menu
+}
+
+# 执行主流程
+main
