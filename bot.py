@@ -70,13 +70,6 @@ if not CHAT_ID:
 def today_str():
     return datetime.now().strftime('%Y%m%d')
 
-# 日志配置
-logging.basicConfig(
-    filename='bot.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
 # 数据文件名函数
 STATS_FILE = lambda: f'stats_{today_str()}.json'
 BAN_FILE = lambda: f'ban_{today_str()}.json'
@@ -84,7 +77,6 @@ TRY_FILE = lambda: f'try_{today_str()}.json'
 USERS_FILE = 'users.json'  # 用户记录文件
 
 # 加载和保存json
-
 def load_json(filename, default):
     if os.path.exists(filename):
         with open(filename, 'r', encoding='utf-8') as f:
@@ -203,7 +195,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             '➡️ /say <内容> - 广播消息\n'
             '➡️ /clear - 清除统计数据\n'
             '➡️ /cleanup - 清除日志文件\n'
-            '➡️ /guard - 获取系统自检报告\n'  # 新增
+            '➡️ /guard - 获取系统自检报告\n'
         )
         help_text += admin_help
     
@@ -231,6 +223,74 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_lines.append(f"{k}: {count} {last_time}")
     msg = '\n'.join(msg_lines) or '暂无统计数据。'
     await update.message.reply_text(f'📊 统计数据:\n{msg}')
+
+async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """查看用户列表（管理员命令）"""
+    user_id = str(update.effective_user.id)
+    
+    # 检查是否为管理员
+    if not is_admin(user_id):
+        if handle_admin_try(user_id):
+            await update.message.reply_text('你多次尝试管理员命令，已被拉黑。')
+        else:
+            await update.message.reply_text('你不是管理员，无权使用此命令。')
+        return
+    
+    try:
+        if not users:
+            await update.message.reply_text('📋 用户列表为空')
+            return
+        
+        # 构建用户列表消息
+        user_list = []
+        total_users = len(users)
+        banned_users = sum(1 for u in users.values() if u.get('is_banned', False))
+        active_users = total_users - banned_users
+        
+        user_list.append(f'📊 用户统计: 总计 {total_users} 人，活跃 {active_users} 人，已封禁 {banned_users} 人\n')
+        
+        # 按最后使用时间排序
+        sorted_users = sorted(users.items(), 
+                            key=lambda x: x[1].get('last_seen', ''), 
+                            reverse=True)
+        
+        # 限制显示前50个用户，避免消息过长
+        display_count = min(50, len(sorted_users))
+        user_list.append(f'📋 最近活跃用户 (显示前{display_count}个):\n')
+        
+        for i, (uid, info) in enumerate(sorted_users[:display_count], 1):
+            username = info.get('username', '无')
+            first_name = info.get('first_name', '无')
+            last_seen = info.get('last_seen', '未知')
+            total_requests = info.get('total_requests', 0)
+            is_banned = info.get('is_banned', False)
+            
+            status = '🚫' if is_banned else '✅'
+            user_info = f'{i}. {status} ID: {uid}\n'
+            user_info += f'   👤 {first_name} (@{username})\n'
+            user_info += f'   📅 最后活跃: {last_seen}\n'
+            user_info += f'   📊 请求次数: {total_requests}\n'
+            
+            user_list.append(user_info)
+        
+        if len(sorted_users) > display_count:
+            user_list.append(f'\n... 还有 {len(sorted_users) - display_count} 个用户未显示')
+        
+        message = '\n'.join(user_list)
+        
+        # 如果消息太长，分段发送
+        if len(message) > 4000:
+            chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
+            for i, chunk in enumerate(chunks):
+                await update.message.reply_text(f'用户列表 (第{i+1}部分):\n{chunk}')
+        else:
+            await update.message.reply_text(message)
+            
+        logger.info(f'管理员 {user_id} 查看了用户列表')
+        
+    except Exception as e:
+        await update.message.reply_text(f'❌ 获取用户列表失败: {str(e)[:100]}')
+        logger.error(f'获取用户列表时出错: {e}')
 
 async def ban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -453,63 +513,6 @@ async def say_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"管理员 {user_id} 完成广播: 成功 {sent}, 失败 {failed}")
 
-# 主函数改进
-# 删除第74-78行的重复日志配置
-# 删除第561-598行的重复代码
-
-# 保留正确的主程序结构（第457-506行）
-if __name__ == '__main__':
-    try:
-        logger.info("FinalShell 激活码机器人启动中...")
-        
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
-        
-        # 错误处理器
-        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-            logger.error(f"更新处理出错: {context.error}")
-            if update and hasattr(update, 'effective_message') and update.effective_message:
-                try:
-                    await update.effective_message.reply_text('处理请求时出现错误，请稍后重试。')
-                except Exception as e:
-                    logger.error(f"发送错误消息失败: {e}")
-        
-        app.add_error_handler(error_handler)
-        
-        # 添加命令处理器
-        app.add_handler(CommandHandler('start', start))
-        app.add_handler(CommandHandler('help', help_cmd))
-        app.add_handler(CommandHandler('stats', stats_cmd))
-        app.add_handler(CommandHandler('ban', ban_cmd))
-        app.add_handler(CommandHandler('unban', unban_cmd))
-        app.add_handler(CommandHandler('clear', clear_cmd))
-        app.add_handler(CommandHandler('cleanup', cleanup_cmd))
-        app.add_handler(CommandHandler('say', say_cmd))
-        app.add_handler(CommandHandler('users', users_cmd))
-        app.add_handler(CommandHandler('guard', guard_cmd))  # Guard命令
-        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        
-        logger.info('机器人启动成功，开始轮询...')
-        print('Bot 运行中...')
-        
-        # 启动机器人
-        app.run_polling(
-            timeout=30,
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30,
-            pool_timeout=30,
-            drop_pending_updates=True
-        )
-        
-    except KeyboardInterrupt:
-        logger.info("收到键盘中断，正在关闭...")
-    except Exception as e:
-        logger.critical(f"机器人启动失败: {e}", exc_info=True)
-        sys.exit(1)
-    finally:
-        logger.info("机器人已关闭")
-
-
 async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """获取最新的自检报告"""
     user_id = str(update.effective_user.id)
@@ -537,10 +540,10 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if result.returncode == 0:
                 await update.message.reply_text('✅ 最新自检报告已发送！')
-                logging.info(f"管理员 {user_id} 请求自检报告成功")
+                logger.info(f"管理员 {user_id} 请求自检报告成功")
             else:
                 await update.message.reply_text('❌ 发送自检报告失败，请检查Guard程序状态。')
-                logging.error(f"发送自检报告失败: {result.stderr}")
+                logger.error(f"发送自检报告失败: {result.stderr}")
         else:
             await update.message.reply_text('⚠️ 今日尚未生成自检报告，正在生成...')
             
@@ -559,44 +562,56 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
     except Exception as e:
         await update.message.reply_text(f'❌ 处理自检报告请求时出错: {str(e)[:100]}')
-        logging.error(f"处理guard命令时出错: {e}")
+        logger.error(f"处理guard命令时出错: {e}")
 
-# 在 help_cmd 函数中添加 /guard 命令说明
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    
-    # 基础帮助信息
-    help_text = (
-        '📚 帮助信息:\n'
-        '➡️ /start - 欢迎使用\n'
-        '➡️ /help - 帮助信息\n'
-        '➡️ 直接向我发送机器码\n'
-        '➡️ 我会计算并返回激活码\n'
-    )
-    
-    # 如果是管理员，显示管理员命令
-    if is_admin(user_id):
-        admin_help = (
-            '\n🔧 管理员命令:\n'
-            '➡️ /stats - 查看统计数据\n'
-            '➡️ /users - 查看用户列表\n'
-            '➡️ /ban <用户ID> - 拉黑用户\n'
-            '➡️ /unban <用户ID> - 解除拉黑\n'
-            '➡️ /say <内容> - 广播消息\n'
-            '➡️ /clear - 清除统计数据\n'
-            '➡️ /cleanup - 清除日志文件\n'
-            '➡️ /guard - 获取系统自检报告\n'  # 新增
-        )
-        help_text += admin_help
-    
-    await update.message.reply_text(help_text)
-
-# 在主程序中添加guard命令处理器
+# 主程序
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    # ... existing handlers ...
-    
-    app.add_handler(CommandHandler('guard', guard_cmd))  # 新增
-    
-    # ... rest of the code ...
+    try:
+        logger.info("FinalShell 激活码机器人启动中...")
+        
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        
+        # 错误处理器
+        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+            logger.error(f"更新处理出错: {context.error}")
+            if update and hasattr(update, 'effective_message') and update.effective_message:
+                try:
+                    await update.effective_message.reply_text('处理请求时出现错误，请稍后重试。')
+                except Exception as e:
+                    logger.error(f"发送错误消息失败: {e}")
+        
+        app.add_error_handler(error_handler)
+        
+        # 添加命令处理器
+        app.add_handler(CommandHandler('start', start))
+        app.add_handler(CommandHandler('help', help_cmd))
+        app.add_handler(CommandHandler('stats', stats_cmd))
+        app.add_handler(CommandHandler('users', users_cmd))
+        app.add_handler(CommandHandler('ban', ban_cmd))
+        app.add_handler(CommandHandler('unban', unban_cmd))
+        app.add_handler(CommandHandler('clear', clear_cmd))
+        app.add_handler(CommandHandler('cleanup', cleanup_cmd))
+        app.add_handler(CommandHandler('say', say_cmd))
+        app.add_handler(CommandHandler('guard', guard_cmd))
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+        
+        logger.info('机器人启动成功，开始轮询...')
+        print('Bot 运行中...')
+        
+        # 启动机器人
+        app.run_polling(
+            timeout=30,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30,
+            drop_pending_updates=True
+        )
+        
+    except KeyboardInterrupt:
+        logger.info("收到键盘中断，正在关闭...")
+    except Exception as e:
+        logger.critical(f"机器人启动失败: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        logger.info("机器人已关闭")
