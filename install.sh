@@ -422,120 +422,28 @@ EOF
     fi
 }
 
-# 在主安装流程中调用
+# 修改主安装流程，移除配置部分
 main_installation() {
-    # 1. 智能系统检测
-    intelligent_system_setup
+    # 1. 检查Python和虚拟环境支持
+    check_python_and_venv
     
-    # 2. 自动安装系统依赖
-    auto_install_system_dependencies
+    # 2. 强制创建虚拟环境
+    create_virtual_environment
     
-    # 3. 智能Python环境设置
-    intelligent_python_setup
+    # 3. 在虚拟环境中安装依赖
+    install_dependencies_in_venv
     
-    # 4. 检测安装模式
-    print_message $BLUE "🔍 检测安装模式..."
-    if [ -w "/usr/local/bin" ]; then
-        INSTALL_MODE="global"
-        INSTALL_DIR="/usr/local/FinalUnlock"
-        print_message $GREEN "✅ 使用全局安装模式"
-    else
-        INSTALL_MODE="local"
-        INSTALL_DIR="$HOME/FinalUnlock"
-        print_message $GREEN "✅ 使用本地安装模式"
-    fi
+    # 4. 创建激活脚本
+    create_activation_script
     
-    # 5. 处理现有安装
-    if [ -d "$INSTALL_DIR" ]; then
-        print_message $YELLOW "🔄 删除现有安装..."
-        rm -rf "$INSTALL_DIR"
-    fi
-    
-    # 6. 创建安装目录
-    print_message $BLUE "📁 创建安装目录: $INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR"
-    
-    # 7. 下载项目
-    print_message $BLUE "📥 下载项目..."
-    cd "$INSTALL_DIR"
-    if git clone https://github.com/xymn2023/FinalUnlock.git . 2>/dev/null; then
-        print_message $GREEN "✅ 项目下载成功"
-    else
-        print_message $YELLOW "⚠️ Git下载失败，尝试curl下载..."
-        curl -L https://github.com/xymn2023/FinalUnlock/archive/main.zip -o main.zip
-        unzip main.zip
-        mv FinalUnlock-main/* .
-        rm -rf FinalUnlock-main main.zip
-        print_message $GREEN "✅ 项目下载成功（curl方式）"
-    fi
-    
-    # 8. 设置执行权限
-    chmod +x *.sh 2>/dev/null || true
-    
-    # 9. 智能虚拟环境创建
-    intelligent_venv_creation
-    
-    # 10. 智能依赖安装
-    intelligent_dependency_installation
-    
-    # 11. 创建启动命令
+    # 5. 创建启动命令
     create_startup_commands
     
-    # 12. 配置处理（支持预配置模式）
     print_message $GREEN "✅ 安装完成！"
-    echo
+    print_message $YELLOW "💡 请使用一键安装脚本来配置Bot Token和Chat ID"
+    print_message $CYAN "bash <(curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/onekey_install.sh)"
     
-    if handle_preconfig_mode; then
-        print_message $GREEN "✅ 预配置模式：配置已自动完成"
-    else
-        print_message $CYAN "🔍 开始交互式配置..."
-        # 原有的配置逻辑
-        while true; do
-            if intelligent_configure_environment; then
-                print_message $GREEN "✅ 配置完成！"
-                break
-            else
-                print_message $YELLOW "⚠️ 配置未完成，请重新配置"
-                echo
-                read -p "按回车键重新开始配置..." -r
-                echo
-            fi
-        done
-    fi
-    
-    print_message $GREEN "🎉 所有配置已完成，机器人已准备就绪！"
-}
-
-# 创建启动命令
-create_startup_commands() {
-    print_message $BLUE "🔧 创建启动命令..."
-    
-    local start_script=""
-    if [ "$USE_SYSTEM_PYTHON" = "true" ]; then
-        start_script="#!/bin/bash\ncd \"$INSTALL_DIR\"\n\"$INSTALL_DIR/start.sh\" \"\$@\""
-    else
-        start_script="#!/bin/bash\ncd \"$INSTALL_DIR\"\nsource \"$INSTALL_DIR/venv/bin/activate\"\n\"$INSTALL_DIR/start.sh\" \"\$@\""
-    fi
-    
-    if [ "$INSTALL_MODE" = "global" ]; then
-        echo -e "$start_script" | sudo tee /usr/local/bin/fn-bot > /dev/null
-        sudo chmod +x /usr/local/bin/fn-bot
-        print_message $GREEN "✅ 全局命令创建成功: fn-bot"
-    else
-        local_bin="$HOME/.local/bin"
-        mkdir -p "$local_bin"
-        echo -e "$start_script" > "$local_bin/fn-bot"
-        chmod +x "$local_bin/fn-bot"
-        print_message $GREEN "✅ 本地命令创建成功: fn-bot"
-    fi
-}
-
-# 配置环境
-configure_environment() {
-    print_message $BLUE "⚙️ 配置Bot Token和Chat ID..."
-    
-    # 这里保持原有的配置逻辑
-    # ... (原有的configure_bot函数内容)
+    print_message $GREEN "🎉 项目安装完成，等待配置..."
 }
 
 # 执行主安装流程
