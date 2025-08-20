@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # FinalShell 激活码机器人一键安装命令 v3.0
-# 完美版本 - 静默安装 + 自动清理 + 用户配置 + 自动启动 + 开机自启 + 管理菜单
 
 # 颜色定义
 RED='\033[0;31m'
@@ -584,14 +583,318 @@ auto_start_bot() {
         return 0
     else
         print_message $RED "❌ 机器人启动失败"
+        print_message $YELLOW "💡 检查日志: cat $project_dir/bot.log"
         rm -f bot.pid
         return 1
     fi
 }
 
 # ==========================================
-# 🆕 第七步：设置开机自启
+# 第七步：设置开机自启
 # ==========================================
+
+setup_autostart() {
+    print_message $BLUE "🔧 第七步：设置开机自启..."
+    
+    # 查找项目目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+        if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 未找到配置完成的项目目录"
+        return 1
+    fi
+    
+    # 服务配置
+    local service_name="finalunlock-bot"
+    local service_file="/etc/systemd/system/${service_name}.service"
+    local user_name=$(whoami)
+    
+    # 检查是否有sudo权限
+    if ! sudo -n true 2>/dev/null; then
+        print_message $YELLOW "⚠️ 需要sudo权限创建systemd服务"
+        print_message $YELLOW "🔧 手动创建服务请运行: bash start.sh -> 选择 [d] systemd服务管理"
+        return 0
+    fi
+    
+    print_message $YELLOW "🔄 创建systemd服务文件..."
+    
+    # 创建服务文件
+    sudo tee "$service_file" > /dev/null << EOF
+[Unit]
+Description=FinalUnlock Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=$user_name
+WorkingDirectory=$project_dir
+ExecStart=$project_dir/start.sh --daemon
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 服务文件已创建: $service_file"
+        
+        # 重新加载systemd
+        print_message $YELLOW "🔄 重新加载systemd..."
+        sudo systemctl daemon-reload
+        
+        # 启用服务
+        print_message $YELLOW "🔄 启用开机自启..."
+        sudo systemctl enable "$service_name"
+        
+        if [ $? -eq 0 ]; then
+            print_message $GREEN "✅ 开机自启设置成功"
+            
+            # 启动服务
+            print_message $YELLOW "🔄 启动systemd服务..."
+            sudo systemctl start "$service_name"
+            
+            # 检查服务状态
+            sleep 2
+            if sudo systemctl is-active "$service_name" >/dev/null 2>&1; then
+                print_message $GREEN "✅ systemd服务运行正常"
+            else
+                print_message $YELLOW "⚠️ systemd服务启动异常，但开机自启已设置"
+            fi
+            
+            print_message $CYAN "💡 服务管理命令:"
+            print_message $CYAN "   启动: sudo systemctl start $service_name"
+            print_message $CYAN "   停止: sudo systemctl stop $service_name"
+            print_message $CYAN "   状态: sudo systemctl status $service_name"
+            print_message $CYAN "   日志: journalctl -u $service_name -f"
+            
+            return 0
+        else
+            print_message $RED "❌ 启用开机自启失败"
+            return 1
+        fi
+    else
+        print_message $RED "❌ 创建服务文件失败"
+        return 1
+    fi
+}
+
+# ==========================================
+# 🆕 第十步：最终验证和修复
+# ==========================================
+
+final_verification_and_fix() {
+    print_message $BLUE "🔍 最终验证和修复..."
+    
+    # 查找项目目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+        if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 项目目录未找到，跳过验证"
+        return 1
+    fi
+    
+    cd "$project_dir"
+    
+    local issues_found=0
+    local issues_fixed=0
+    
+    print_message $CYAN "🔍 检查1: bot.py进程状态..."
+    
+    # 检查bot进程
+    if [ -f "bot.pid" ]; then
+        local pid=$(cat bot.pid 2>/dev/null)
+        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ bot.py进程运行正常 (PID: $pid)"
+        else
+            print_message $YELLOW "⚠️ bot.pid文件存在但进程未运行，尝试修复..."
+            issues_found=$((issues_found + 1))
+            
+            # 清理无效PID文件并重启
+            rm -f bot.pid
+            
+            # 重新启动bot
+            print_message $YELLOW "🔄 重新启动bot.py..."
+            local python_cmd="python3"
+            if [ -d "venv" ]; then
+                source venv/bin/activate
+                python_cmd="python"
+            fi
+            
+            nohup $python_cmd bot.py > bot.log 2>&1 &
+            local new_pid=$!
+            echo $new_pid > bot.pid
+            
+            sleep 3
+            if ps -p $new_pid > /dev/null 2>&1; then
+                print_message $GREEN "✅ bot.py重启成功 (PID: $new_pid)"
+                issues_fixed=$((issues_fixed + 1))
+            else
+                print_message $RED "❌ bot.py重启失败，请检查日志: cat bot.log"
+            fi
+        fi
+    else
+        print_message $YELLOW "⚠️ bot.pid文件不存在，检查进程..."
+        issues_found=$((issues_found + 1))
+        
+        # 查找运行中的bot进程
+        local running_pid=$(pgrep -f "python.*bot.py" | head -1)
+        if [ -n "$running_pid" ]; then
+            print_message $GREEN "✅ 发现运行中的bot进程 (PID: $running_pid)"
+            echo $running_pid > bot.pid
+            print_message $GREEN "✅ 已创建PID文件"
+            issues_fixed=$((issues_fixed + 1))
+        else
+            print_message $YELLOW "🔄 未发现bot进程，启动新进程..."
+            
+            local python_cmd="python3"
+            if [ -d "venv" ]; then
+                source venv/bin/activate
+                python_cmd="python"
+            fi
+            
+            nohup $python_cmd bot.py > bot.log 2>&1 &
+            local new_pid=$!
+            echo $new_pid > bot.pid
+            
+            sleep 3
+            if ps -p $new_pid > /dev/null 2>&1; then
+                print_message $GREEN "✅ bot.py启动成功 (PID: $new_pid)"
+                issues_fixed=$((issues_fixed + 1))
+            else
+                print_message $RED "❌ bot.py启动失败，请检查日志: cat bot.log"
+            fi
+        fi
+    fi
+    
+    print_message $CYAN "🔍 检查2: systemd服务状态..."
+    
+    # 检查systemd服务
+    local service_name="finalunlock-bot"
+    if systemctl list-unit-files | grep -q "$service_name.service"; then
+        if systemctl is-enabled "$service_name" >/dev/null 2>&1; then
+            print_message $GREEN "✅ systemd服务已启用"
+            
+            if systemctl is-active "$service_name" >/dev/null 2>&1; then
+                print_message $GREEN "✅ systemd服务运行正常"
+            else
+                print_message $YELLOW "⚠️ systemd服务未激活，尝试启动..."
+                issues_found=$((issues_found + 1))
+                
+                if sudo systemctl start "$service_name" 2>/dev/null; then
+                    print_message $GREEN "✅ systemd服务启动成功"
+                    issues_fixed=$((issues_fixed + 1))
+                else
+                    print_message $YELLOW "⚠️ systemd服务启动失败（不影响bot运行）"
+                fi
+            fi
+        else
+            print_message $YELLOW "⚠️ systemd服务未启用"
+            issues_found=$((issues_found + 1))
+            
+            if sudo systemctl enable "$service_name" 2>/dev/null; then
+                print_message $GREEN "✅ systemd服务已启用"
+                issues_fixed=$((issues_fixed + 1))
+            fi
+        fi
+    else
+        print_message $YELLOW "⚠️ systemd服务文件不存在"
+        issues_found=$((issues_found + 1))
+    fi
+    
+    print_message $CYAN "🔍 检查3: Guard守护进程状态..."
+    
+    # 检查Guard进程
+    if [ -f "guard.pid" ]; then
+        local guard_pid=$(cat guard.pid 2>/dev/null)
+        if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ Guard守护进程运行正常"
+        else
+            print_message $YELLOW "⚠️ Guard进程未运行，尝试重启..."
+            issues_found=$((issues_found + 1))
+            
+            rm -f guard.pid
+            
+            local python_cmd="python3"
+            if [ -d "venv" ]; then
+                source venv/bin/activate
+                python_cmd="python"
+            fi
+            
+            nohup $python_cmd guard.py daemon > guard.log 2>&1 &
+            sleep 2
+            
+            if [ -f "guard.pid" ]; then
+                local new_guard_pid=$(cat guard.pid 2>/dev/null)
+                if [ -n "$new_guard_pid" ] && ps -p $new_guard_pid > /dev/null 2>&1; then
+                    print_message $GREEN "✅ Guard守护进程重启成功"
+                    issues_fixed=$((issues_fixed + 1))
+                else
+                    print_message $RED "❌ Guard守护进程重启失败"
+                fi
+            else
+                print_message $RED "❌ Guard守护进程启动失败"
+            fi
+        fi
+    else
+        print_message $YELLOW "⚠️ Guard PID文件不存在，启动Guard..."
+        issues_found=$((issues_found + 1))
+        
+        local python_cmd="python3"
+        if [ -d "venv" ]; then
+            source venv/bin/activate
+            python_cmd="python"
+        fi
+        
+        nohup $python_cmd guard.py daemon > guard.log 2>&1 &
+        sleep 2
+        
+        if [ -f "guard.pid" ]; then
+            local guard_pid=$(cat guard.pid 2>/dev/null)
+            if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+                print_message $GREEN "✅ Guard守护进程启动成功"
+                issues_fixed=$((issues_fixed + 1))
+            else
+                print_message $RED "❌ Guard守护进程启动失败"
+            fi
+        else
+            print_message $RED "❌ Guard守护进程启动失败"
+        fi
+    fi
+    
+    # 总结
+    echo
+    if [ $issues_found -eq 0 ]; then
+        print_message $GREEN "🎉 系统验证完成，一切正常！"
+    else
+        print_message $BLUE "📊 验证结果："
+        print_message $YELLOW "   发现问题: $issues_found 个"
+        print_message $GREEN "   修复成功: $issues_fixed 个"
+        
+        if [ $issues_fixed -eq $issues_found ]; then
+            print_message $GREEN "🎉 所有问题已自动修复！"
+        else
+            print_message $YELLOW "⚠️ 部分问题需要手动处理"
+            print_message $CYAN "💡 建议运行: bash start.sh 进行进一步排查"
+        fi
+    fi
+    
+    return 0
+}
 
 setup_autostart() {
     print_message $BLUE "⚙️ 第七步：设置开机自启..."
@@ -1184,10 +1487,13 @@ main() {
     # 第八步：显示完成
     show_completion
     
-    # 🆕 第九步：自动系统修复
+    # 🆕 第九步：自动系统修复和验证
     auto_system_fix
     
-    # 🆕 第十步：显示管理菜单（不自动退出）
+    # 🆕 第十步：最终验证和修复
+    final_verification_and_fix
+    
+    # 🆕 第十一步：显示管理菜单（不自动退出）
     show_management_menu
 }
 
