@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # FinalShell 激活码机器人一键安装脚本 v3.0
-# 真正的一键安装 - 自动处理所有环境问题
 # 项目地址: https://github.com/xymn2023/FinalUnlock
 
 # 颜色定义
@@ -397,7 +396,33 @@ intelligent_dependency_installation() {
     fi
 }
 
-# 主安装流程
+# 在install.sh开头添加预配置检查
+handle_preconfig_mode() {
+    if [ "$AUTO_INSTALL_MODE" = "true" ]; then
+        print_message $BLUE "🤖 自动安装模式"
+        
+        if [ -n "$AUTO_BOT_TOKEN" ] && [ -n "$AUTO_CHAT_ID" ]; then
+            print_message $GREEN "✅ 使用预设配置，无需用户输入"
+            
+            # 自动创建.env文件
+            local env_file="$INSTALL_DIR/.env"
+            cat > "$env_file" << EOF
+BOT_TOKEN=$AUTO_BOT_TOKEN
+CHAT_ID=$AUTO_CHAT_ID
+EOF
+            
+            print_message $GREEN "✅ 配置文件已自动创建"
+            return 0
+        else
+            print_message $RED "❌ 自动模式配置不完整"
+            exit 1
+        fi
+    else
+        return 1
+    fi
+}
+
+# 在主安装流程中调用
 main_installation() {
     # 1. 智能系统检测
     intelligent_system_setup
@@ -456,10 +481,29 @@ main_installation() {
     # 11. 创建启动命令
     create_startup_commands
     
-    # 12. 配置环境
-    configure_environment
+    # 12. 配置处理（支持预配置模式）
+    print_message $GREEN "✅ 安装完成！"
+    echo
     
-    print_message $GREEN "🎉 一键安装完成！"
+    if handle_preconfig_mode; then
+        print_message $GREEN "✅ 预配置模式：配置已自动完成"
+    else
+        print_message $CYAN "🔍 开始交互式配置..."
+        # 原有的配置逻辑
+        while true; do
+            if intelligent_configure_environment; then
+                print_message $GREEN "✅ 配置完成！"
+                break
+            else
+                print_message $YELLOW "⚠️ 配置未完成，请重新配置"
+                echo
+                read -p "按回车键重新开始配置..." -r
+                echo
+            fi
+        done
+    fi
+    
+    print_message $GREEN "🎉 所有配置已完成，机器人已准备就绪！"
 }
 
 # 创建启动命令
@@ -668,5 +712,243 @@ check_system_compatibility() {
         print_message $YELLOW "⚠️ 无sudo权限，某些功能可能受限"
         HAS_SUDO=false
     fi
+}
+
+# 增强版Bot Token验证
+validate_bot_token() {
+    local token="$1"
+    
+    # 检查是否为空
+    if [ -z "$token" ]; then
+        echo "empty"
+        return 1
+    fi
+    
+    # 检查基本格式：数字:字母数字字符
+    if [[ ! "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        echo "invalid_format"
+        return 1
+    fi
+    
+    # 检查长度（Telegram Bot Token通常很长）
+    if [ ${#token} -lt 35 ]; then
+        echo "too_short"
+        return 1
+    fi
+    
+    echo "valid"
+    return 0
+}
+
+# 增强版Chat ID验证
+validate_chat_id() {
+    local chat_id="$1"
+    
+    # 检查是否为空
+    if [ -z "$chat_id" ]; then
+        echo "empty"
+        return 1
+    fi
+    
+    # 检查格式：单个数字或逗号分隔的数字
+    if [[ ! "$chat_id" =~ ^[0-9]+([,][0-9]+)*$ ]]; then
+        echo "invalid_format"
+        return 1
+    fi
+    
+    # 检查每个ID的长度
+    IFS=',' read -ra IDS <<< "$chat_id"
+    for id in "${IDS[@]}"; do
+        if [ ${#id} -lt 5 ] || [ ${#id} -gt 15 ]; then
+            echo "invalid_length"
+            return 1
+        fi
+    done
+    
+    echo "valid"
+    return 0
+}
+
+# 测试Bot Token有效性
+test_bot_token() {
+    local token="$1"
+    
+    if [ -z "$token" ]; then
+        return 1
+    fi
+    
+    # 使用curl测试Token
+    if command -v curl &> /dev/null; then
+        local response=$(curl -s "https://api.telegram.org/bot$token/getMe" 2>/dev/null)
+        if echo "$response" | grep -q '"ok":true'; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# 智能配置环境（带在线验证）
+intelligent_configure_environment() {
+    print_message $BLUE "⚙️ 智能配置Bot Token和Chat ID..."
+    
+    local env_file="$INSTALL_DIR/.env"
+    
+    # 检查现有配置
+    if [ -f "$env_file" ]; then
+        print_message $YELLOW "⚠️ 发现已存在的.env文件"
+        
+        # 读取现有配置
+        local existing_token=$(grep '^BOT_TOKEN=' "$env_file" 2>/dev/null | cut -d'=' -f2)
+        local existing_chat_id=$(grep '^CHAT_ID=' "$env_file" 2>/dev/null | cut -d'=' -f2)
+        
+        if [ -n "$existing_token" ] && [ -n "$existing_chat_id" ]; then
+            print_message $CYAN "📋 现有配置:"
+            print_message $CYAN "Bot Token: ${existing_token:0:20}..."
+            print_message $CYAN "Chat ID: $existing_chat_id"
+            echo
+            read -p "是否使用现有配置? (Y/n): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                print_message $GREEN "✅ 使用现有配置"
+                return 0
+            fi
+        fi
+    fi
+    
+    print_message $YELLOW "💡 开始交互式配置"
+    print_message $CYAN "📋 请准备好您的Bot Token和Chat ID"
+    echo
+    
+    # 显示获取指南
+    print_message $BLUE "📖 获取指南:"
+    print_message $CYAN "1. Bot Token获取:"
+    print_message $CYAN "   • 在Telegram中搜索 @BotFather"
+    print_message $CYAN "   • 发送 /newbot 创建新机器人"
+    print_message $CYAN "   • 按提示设置机器人名称和用户名"
+    print_message $CYAN "   • 复制获得的Token"
+    echo
+    print_message $CYAN "2. Chat ID获取:"
+    print_message $CYAN "   • 在Telegram中搜索 @userinfobot"
+    print_message $CYAN "   • 发送任意消息获取您的用户ID"
+    print_message $CYAN "   • 复制显示的数字ID"
+    echo
+    
+    read -p "准备好后按回车键开始配置..." -r
+    echo
+    
+    # 配置Bot Token（带验证）
+    while true; do
+        print_message $BLUE "📝 第一步：配置Bot Token"
+        
+        while true; do
+            read -p "请输入Bot Token: " BOT_TOKEN
+            
+            if [ -n "$BOT_TOKEN" ]; then
+                local validation=$(validate_bot_token "$BOT_TOKEN")
+                case $validation in
+                    "empty")
+                        print_message $RED "❌ Bot Token不能为空"
+                        ;;
+                    "invalid_format")
+                        print_message $RED "❌ Bot Token格式不正确"
+                        print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                        ;;
+                    "too_short")
+                        print_message $RED "❌ Bot Token长度不足"
+                        ;;
+                    "valid")
+                        print_message $GREEN "✅ Bot Token格式正确"
+                        
+                        # 在线验证
+                        print_message $YELLOW "🌐 正在验证Bot Token有效性..."
+                        if test_bot_token "$BOT_TOKEN"; then
+                            print_message $GREEN "✅ Bot Token验证成功！"
+                            break 2
+                        else
+                            print_message $YELLOW "⚠️ Bot Token验证失败（可能是网络问题）"
+                            read -p "是否继续使用此Token? (y/N): " -n 1 -r
+                            echo
+                            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                                break 2
+                            fi
+                        fi
+                        ;;
+                esac
+            else
+                print_message $RED "❌ Bot Token不能为空"
+            fi
+        done
+    done
+    
+    echo
+    
+    # 配置Chat ID（带验证）
+    while true; do
+        print_message $BLUE "📝 第二步：配置Chat ID"
+        
+        while true; do
+            read -p "请输入Chat ID: " CHAT_ID
+            
+            if [ -n "$CHAT_ID" ]; then
+                local validation=$(validate_chat_id "$CHAT_ID")
+                case $validation in
+                    "empty")
+                        print_message $RED "❌ Chat ID不能为空"
+                        ;;
+                    "invalid_format")
+                        print_message $RED "❌ Chat ID格式不正确"
+                        print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+                        ;;
+                    "invalid_length")
+                        print_message $RED "❌ Chat ID长度不正确"
+                        ;;
+                    "valid")
+                        print_message $GREEN "✅ Chat ID格式正确"
+                        break 2
+                        ;;
+                esac
+            else
+                print_message $RED "❌ Chat ID不能为空"
+            fi
+        done
+    done
+    
+    echo
+    
+    # 最终确认
+    print_message $BLUE "📋 配置信息确认:"
+    print_message $CYAN "Bot Token: ${BOT_TOKEN:0:20}..."
+    print_message $CYAN "Chat ID: $CHAT_ID"
+    echo
+    
+    while true; do
+        read -p "确认保存配置吗? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            break
+        else
+            print_message $YELLOW "⚠️ 配置已取消，请重新开始"
+            return 1
+        fi
+    done
+    
+    # 创建.env文件
+    cat > "$env_file" << EOF
+BOT_TOKEN=$BOT_TOKEN
+CHAT_ID=$CHAT_ID
+EOF
+    
+    print_message $GREEN "✅ 环境配置已保存到 .env 文件"
+    
+    # 测试配置
+    print_message $YELLOW "🔄 测试配置..."
+    if test_bot_token "$BOT_TOKEN"; then
+        print_message $GREEN "✅ 配置测试成功！机器人已准备就绪"
+    else
+        print_message $YELLOW "⚠️ 配置测试失败，但配置已保存"
+    fi
+    
+    return 0
 }
 

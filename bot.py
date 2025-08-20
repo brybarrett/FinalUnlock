@@ -454,6 +454,10 @@ async def say_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"管理员 {user_id} 完成广播: 成功 {sent}, 失败 {failed}")
 
 # 主函数改进
+# 删除第74-78行的重复日志配置
+# 删除第561-598行的重复代码
+
+# 保留正确的主程序结构（第457-506行）
 if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
