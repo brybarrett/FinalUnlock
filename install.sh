@@ -137,7 +137,7 @@ check_python_and_venv() {
 }
 
 # 创建虚拟环境
-# 在create_virtual_environment函数中，项目下载成功后添加权限设置
+# 修复create_virtual_environment函数中的项目下载部分
 create_virtual_environment() {
     print_message $BLUE "🐍 创建虚拟环境..."
     
@@ -156,13 +156,23 @@ create_virtual_environment() {
         rm -rf "$INSTALL_DIR"
     fi
     
-    mkdir -p "$INSTALL_DIR"
+    # 🔧 修复：确保父目录存在
+    mkdir -p "$(dirname "$INSTALL_DIR")"
     print_message $GREEN "✅ 创建安装目录: $INSTALL_DIR"
     
     # 下载项目
     print_message $BLUE "📥 下载项目..."
     if git clone https://github.com/xymn2023/FinalUnlock.git "$INSTALL_DIR"; then
         print_message $GREEN "✅ 项目下载成功"
+        
+        # 🔧 新增：验证关键文件是否存在
+        if [ -f "$INSTALL_DIR/bot.py" ] && [ -f "$INSTALL_DIR/py.py" ] && [ -f "$INSTALL_DIR/requirements.txt" ]; then
+            print_message $GREEN "✅ 核心文件验证通过"
+        else
+            print_message $RED "❌ 核心文件缺失，重新下载..."
+            rm -rf "$INSTALL_DIR"
+            git clone https://github.com/xymn2023/FinalUnlock.git "$INSTALL_DIR"
+        fi
     else
         print_message $RED "❌ 项目下载失败"
         exit 1
@@ -170,10 +180,11 @@ create_virtual_environment() {
     
     cd "$INSTALL_DIR"
     
-    # 🔧 新增：设置shell脚本执行权限
-    print_message $YELLOW "🔐 设置脚本执行权限..."
+    # 🔧 新增：设置文件权限
+    print_message $YELLOW "🔐 设置文件权限..."
     chmod +x *.sh 2>/dev/null || true
-    print_message $GREEN "✅ 脚本权限设置完成"
+    chmod 644 *.py 2>/dev/null || true
+    print_message $GREEN "✅ 文件权限设置完成"
     
     # 创建虚拟环境
     local venv_dir="$INSTALL_DIR/venv"
@@ -200,6 +211,12 @@ create_virtual_environment() {
         print_message $RED "❌ 虚拟环境激活失败"
         exit 1
     fi
+    
+    # 🔧 新增：输出安装目录信息供调试
+    print_message $CYAN "📋 安装目录信息:"
+    print_message $CYAN "   路径: $INSTALL_DIR"
+    print_message $CYAN "   权限: $(ls -ld "$INSTALL_DIR" 2>/dev/null || echo '检查失败')"
+    print_message $CYAN "   文件数: $(ls -1 "$INSTALL_DIR" 2>/dev/null | wc -l || echo '0')"
 }
 
 # 在虚拟环境中安装依赖

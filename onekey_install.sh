@@ -300,26 +300,80 @@ download_and_install() {
 # 第四步：用户配置收集
 # ==========================================
 
+# 修复collect_user_configuration函数中的目录检测
 collect_user_configuration() {
     print_message $BLUE "⚙️ 第四步：配置Bot Token和Chat ID..."
     
-    # 查找项目安装目录
+    # 🔧 修复：更强健的项目目录查找逻辑
     local project_dir=""
-    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock"; do
+    local search_dirs=("/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock" "./FinalUnlock")
+    
+    print_message $YELLOW "🔍 搜索项目安装目录..."
+    for dir in "${search_dirs[@]}"; do
+        print_message $CYAN "   检查: $dir"
         if [ -d "$dir" ]; then
-            project_dir="$dir"
-            break
+            print_message $CYAN "   ✅ 目录存在"
+            # 检查关键文件
+            if [ -f "$dir/bot.py" ] && [ -f "$dir/py.py" ]; then
+                project_dir="$dir"
+                print_message $GREEN "✅ 找到完整项目目录: $dir"
+                break
+            else
+                print_message $YELLOW "   ⚠️ 目录存在但文件不完整"
+            fi
+        else
+            print_message $CYAN "   ❌ 目录不存在"
         fi
     done
     
+    # 🔧 新增：如果找不到目录，尝试手动创建
     if [ -z "$project_dir" ]; then
-        print_message $RED "❌ 未找到项目安装目录"
-        exit 1
+        print_message $YELLOW "🔧 未找到项目目录，尝试手动安装..."
+        
+        # 选择安装目录
+        if [ "$EUID" -eq 0 ]; then
+            project_dir="/usr/local/FinalUnlock"
+        else
+            project_dir="$HOME/FinalUnlock"
+        fi
+        
+        print_message $BLUE "📥 手动克隆项目到: $project_dir"
+        
+        # 确保父目录存在
+        mkdir -p "$(dirname "$project_dir")"
+        
+        # 克隆项目
+        if git clone https://github.com/xymn2023/FinalUnlock.git "$project_dir"; then
+            print_message $GREEN "✅ 项目手动安装成功"
+            
+            # 设置权限
+            cd "$project_dir"
+            chmod +x *.sh 2>/dev/null || true
+            
+            # 创建虚拟环境
+            if python3 -m venv venv; then
+                source venv/bin/activate
+                pip install --upgrade pip
+                pip install -r requirements.txt
+                print_message $GREEN "✅ 虚拟环境和依赖安装完成"
+            else
+                print_message $RED "❌ 虚拟环境创建失败"
+                exit 1
+            fi
+        else
+            print_message $RED "❌ 手动项目安装失败"
+            exit 1
+        fi
     fi
     
     print_message $GREEN "✅ 项目目录: $project_dir"
     cd "$project_dir"
     
+    # 🔧 新增：显示目录内容用于调试
+    print_message $CYAN "📋 项目目录内容:"
+    ls -la "$project_dir" | head -10
+    
+    # 其余配置逻辑保持不变...
     # 显示配置指南
     print_message $CYAN "📖 配置指南:"
     echo
@@ -509,65 +563,7 @@ show_completion() {
 # 主执行流程
 # ==========================================
 
-# 在start_services函数后添加开机自启函数
-setup_autostart() {
-    print_message $BLUE "⚙️ 设置开机自启..."
-    
-    # 查找项目目录
-    local project_dir=""
-    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock"; do
-        if [ -d "$dir" ]; then
-            project_dir="$dir"
-            break
-        fi
-    done
-    
-    if [ -z "$project_dir" ]; then
-        print_message $RED "❌ 未找到项目目录"
-        return 1
-    fi
-    
-    # 创建systemd服务文件
-    local service_file="/etc/systemd/system/finalunlock-bot.service"
-    
-    cat > /tmp/finalunlock-bot.service << EOF
-[Unit]
-Description=FinalUnlock Telegram Bot
-After=network.target
-Wants=network.target
-
-[Service]
-Type=forking
-User=root
-WorkingDirectory=$project_dir
-Environment=PATH=$project_dir/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStartPre=/bin/bash -c 'cd $project_dir && source venv/bin/activate'
-ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python3 bot.py > bot.log 2>&1 & echo \$! > bot.pid'
-ExecStop=/bin/bash -c 'if [ -f $project_dir/bot.pid ]; then kill \$(cat $project_dir/bot.pid); rm -f $project_dir/bot.pid; fi'
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # 安装服务文件
-    if sudo cp /tmp/finalunlock-bot.service "$service_file"; then
-        sudo systemctl daemon-reload
-        sudo systemctl enable finalunlock-bot.service
-        print_message $GREEN "✅ 开机自启设置成功"
-        print_message $CYAN "💡 服务管理命令:"
-        print_message $CYAN "   启动: sudo systemctl start finalunlock-bot"
-        print_message $CYAN "   停止: sudo systemctl stop finalunlock-bot"
-        print_message $CYAN "   状态: sudo systemctl status finalunlock-bot"
-    else
-        print_message $YELLOW "⚠️ 开机自启设置失败，需要手动配置"
-    fi
-    
-    rm -f /tmp/finalunlock-bot.service
-}
-
-# 修改main函数，在start_services后添加开机自启
+# 在main函数中添加自动启动和开机自启
 main() {
     # 第一步：预检查和清理
     precheck_and_cleanup
@@ -590,12 +586,262 @@ main() {
     # 第五步：启动服务
     start_services
     
-    # 🆕 第六步：设置开机自启
+    # 🆕 第六步：自动启动机器人
+    auto_start_bot
+    
+    # 🆕 第七步：设置开机自启
     setup_autostart
     
-    # 第七步：显示完成
+    # 第八步：显示完成
     show_completion
+    
+    # 🆕 第九步：显示管理菜单（不自动退出）
+    show_management_menu
 }
 
-# 执行主流程
-main
+# 新增：自动启动机器人函数
+auto_start_bot() {
+    print_message $BLUE "🚀 第六步：自动启动机器人..."
+    
+    # 查找项目目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+        if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 未找到配置完成的项目目录"
+        return 1
+    fi
+    
+    cd "$project_dir"
+    
+    # 设置权限
+    chmod +x *.sh 2>/dev/null || true
+    
+    # 激活虚拟环境并启动
+    local python_cmd="python3"
+    if [ -d "venv" ]; then
+        source venv/bin/activate
+        python_cmd="python"
+    fi
+    
+    # 启动机器人
+    print_message $YELLOW "🔄 启动机器人到后台..."
+    nohup $python_cmd bot.py > bot.log 2>&1 &
+    local bot_pid=$!
+    
+    echo $bot_pid > bot.pid
+    
+    # 验证启动
+    sleep 3
+    if ps -p $bot_pid > /dev/null 2>&1; then
+        print_message $GREEN "✅ 机器人启动成功 (PID: $bot_pid)"
+        print_message $CYAN "📋 日志文件: $project_dir/bot.log"
+        return 0
+    else
+        print_message $RED "❌ 机器人启动失败"
+        rm -f bot.pid
+        return 1
+    fi
+}
+
+# 新增：设置开机自启函数
+setup_autostart() {
+    print_message $BLUE "⚙️ 第七步：设置开机自启..."
+    
+    # 查找项目目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+        if [ -d "$dir" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 未找到项目目录"
+        return 1
+    fi
+    
+    # 创建systemd服务
+    local service_content="[Unit]
+Description=FinalUnlock Telegram Bot
+After=network.target
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=$project_dir
+ExecStart=/bin/bash -c 'cd $project_dir && source venv/bin/activate && nohup python bot.py > bot.log 2>&1 & echo \$! > bot.pid'
+ExecStop=/bin/bash -c 'if [ -f $project_dir/bot.pid ]; then kill \$(cat $project_dir/bot.pid); rm -f $project_dir/bot.pid; fi'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target"
+    
+    echo "$service_content" | sudo tee /etc/systemd/system/finalunlock-bot.service > /dev/null
+    
+    if sudo systemctl daemon-reload && sudo systemctl enable finalunlock-bot.service; then
+        print_message $GREEN "✅ 开机自启设置成功"
+        print_message $CYAN "💡 服务管理命令:"
+        print_message $CYAN "   启动: sudo systemctl start finalunlock-bot"
+        print_message $CYAN "   停止: sudo systemctl stop finalunlock-bot"
+        print_message $CYAN "   状态: sudo systemctl status finalunlock-bot"
+    else
+        print_message $YELLOW "⚠️ 开机自启设置失败"
+    fi
+}
+
+# 新增：管理菜单（防止自动退出）
+show_management_menu() {
+    while true; do
+        echo
+        print_message $PURPLE "================================"
+        print_message $PURPLE "   🎉 安装完成管理菜单 🎉"
+        print_message $PURPLE "================================"
+        echo
+        
+        # 检查机器人状态
+        local bot_status="❌ 未运行"
+        local project_dir=""
+        for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+            if [ -d "$dir" ] && [ -f "$dir/bot.pid" ]; then
+                project_dir="$dir"
+                local pid=$(cat "$dir/bot.pid" 2>/dev/null)
+                if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+                    bot_status="✅ 运行中 (PID: $pid)"
+                fi
+                break
+            fi
+        done
+        
+        print_message $CYAN "当前状态: $bot_status"
+        if [ -n "$project_dir" ]; then
+            print_message $CYAN "安装目录: $project_dir"
+        fi
+        echo
+        
+        print_message $BLUE "=== 🤖 机器人管理 ==="
+        print_message $CYAN "[1] 启动/重启机器人"
+        print_message $CYAN "[2] 停止机器人"
+        print_message $CYAN "[3] 查看运行日志"
+        print_message $CYAN "[4] 检查机器人状态"
+        echo
+        print_message $BLUE "=== ⚙️ 系统管理 ==="
+        print_message $CYAN "[5] 重新配置Bot Token和Chat ID"
+        print_message $CYAN "[6] 测试机器人功能"
+        print_message $CYAN "[7] 查看系统服务状态"
+        print_message $CYAN "[8] 启动完整管理界面"
+        echo
+        print_message $CYAN "[0] 退出安装程序"
+        echo
+        
+        read -p "请选择操作 [0-8]: " choice
+        
+        case $choice in
+            1)
+                if [ -n "$project_dir" ]; then
+                    auto_start_bot
+                else
+                    print_message $RED "❌ 未找到项目目录"
+                fi
+                ;;
+            2)
+                if [ -n "$project_dir" ] && [ -f "$project_dir/bot.pid" ]; then
+                    local pid=$(cat "$project_dir/bot.pid")
+                    if ps -p $pid > /dev/null 2>&1; then
+                        kill $pid
+                        rm -f "$project_dir/bot.pid"
+                        print_message $GREEN "✅ 机器人已停止"
+                    else
+                        print_message $YELLOW "⚠️ 机器人未在运行"
+                    fi
+                else
+                    print_message $YELLOW "⚠️ 未找到运行中的机器人"
+                fi
+                ;;
+            3)
+                if [ -n "$project_dir" ] && [ -f "$project_dir/bot.log" ]; then
+                    print_message $BLUE "📋 最新日志 (按Ctrl+C退出):"
+                    tail -f "$project_dir/bot.log"
+                else
+                    print_message $YELLOW "⚠️ 日志文件不存在"
+                fi
+                ;;
+            4)
+                if [ -n "$project_dir" ] && [ -f "$project_dir/bot.pid" ]; then
+                    local pid=$(cat "$project_dir/bot.pid")
+                    if ps -p $pid > /dev/null 2>&1; then
+                        print_message $GREEN "✅ 机器人正在运行 (PID: $pid)"
+                        print_message $CYAN "📊 进程信息:"
+                        ps -p $pid -o pid,ppid,cmd,etime,pcpu,pmem
+                    else
+                        print_message $RED "❌ 机器人进程不存在"
+                    fi
+                else
+                    print_message $YELLOW "⚠️ 未找到PID文件"
+                fi
+                ;;
+            5)
+                if [ -n "$project_dir" ]; then
+                    cd "$project_dir"
+                    collect_user_configuration
+                else
+                    print_message $RED "❌ 未找到项目目录"
+                fi
+                ;;
+            6)
+                if [ -n "$project_dir" ] && [ -f "$project_dir/.env" ]; then
+                    cd "$project_dir"
+                    source .env
+                    if [ -n "$BOT_TOKEN" ]; then
+                        print_message $YELLOW "🔄 测试Bot Token..."
+                        if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
+                            print_message $GREEN "✅ Bot Token有效"
+                        else
+                            print_message $RED "❌ Bot Token无效"
+                        fi
+                    else
+                        print_message $RED "❌ 未配置Bot Token"
+                    fi
+                else
+                    print_message $RED "❌ 配置文件不存在"
+                fi
+                ;;
+            7)
+                print_message $BLUE "📊 系统服务状态:"
+                if systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
+                    print_message $GREEN "✅ 开机自启已启用"
+                    systemctl status finalunlock-bot.service --no-pager
+                else
+                    print_message $YELLOW "⚠️ 开机自启未启用"
+                fi
+                ;;
+            8)
+                if [ -n "$project_dir" ]; then
+                    print_message $BLUE "🚀 启动完整管理界面..."
+                    cd "$project_dir"
+                    ./start.sh
+                else
+                    print_message $RED "❌ 未找到项目目录"
+                fi
+                ;;
+            0)
+                print_message $GREEN "👋 感谢使用FinalUnlock！"
+                print_message $CYAN "💡 使用 'fn-bot' 命令可随时管理机器人"
+                exit 0
+                ;;
+            *)
+                print_message $RED "❌ 无效选择，请重新输入"
+                ;;
+        esac
+        
+        echo
+        read -p "按回车键继续..." -r
+    done
+}
