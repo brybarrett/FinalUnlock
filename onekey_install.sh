@@ -536,6 +536,48 @@ start_services() {
         print_message $YELLOW "⚠️ 机器人启动检查超时，但继续启动Guard"
     fi
     
+    # ✅ 关键修复：停止现有的Guard进程，避免冲突
+    print_message $YELLOW "🔄 检查并停止现有Guard进程..."
+    
+    # 停止通过PID文件的Guard进程
+    if [ -f "guard.pid" ]; then
+        local old_guard_pid=$(cat guard.pid 2>/dev/null)
+        if [ -n "$old_guard_pid" ] && ps -p $old_guard_pid > /dev/null 2>&1; then
+            print_message $YELLOW "🔄 停止现有Guard进程 (PID: $old_guard_pid)..."
+            kill $old_guard_pid 2>/dev/null
+            sleep 3
+            if ps -p $old_guard_pid > /dev/null 2>&1; then
+                kill -9 $old_guard_pid 2>/dev/null
+            fi
+        fi
+    fi
+    
+    # 停止所有guard.py进程
+    local guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+    if [ -n "$guard_pids" ]; then
+        print_message $YELLOW "🔄 发现其他Guard进程，正在停止..."
+        echo "$guard_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $YELLOW "   停止Guard进程 PID: $pid"
+                kill $pid 2>/dev/null
+            fi
+        done
+        sleep 3
+        
+        # 强制停止
+        guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+        if [ -n "$guard_pids" ]; then
+            echo "$guard_pids" | while read -r pid; do
+                if [ -n "$pid" ]; then
+                    kill -9 $pid 2>/dev/null
+                fi
+            done
+        fi
+    fi
+    
+    # 清理PID文件
+    rm -f guard.pid
+    
     # 启动Guard守护程序
     local python_cmd="python3"
     if [ -d "venv" ]; then
@@ -543,6 +585,7 @@ start_services() {
         python_cmd="python"
     fi
     
+    print_message $GREEN "✅ Guard环境清理完成，启动新的Guard进程..."
     print_message $YELLOW "🛡️ 启动Guard守护程序..."
     nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &
     local guard_pid=$!
@@ -640,8 +683,49 @@ auto_start_bot() {
     
     print_message $GREEN "✅ 配置验证通过，启动机器人..."
     
+    # ✅ 关键修复：停止所有运行中的bot进程，避免冲突
+    print_message $YELLOW "🔄 检查并停止现有bot进程..."
+    
+    # 方法1：通过PID文件停止
+    if [ -f "bot.pid" ]; then
+        local old_pid=$(cat bot.pid 2>/dev/null)
+        if [ -n "$old_pid" ] && ps -p $old_pid > /dev/null 2>&1; then
+            print_message $YELLOW "🔄 停止现有bot进程 (PID: $old_pid)..."
+            kill $old_pid 2>/dev/null
+            sleep 3
+            if ps -p $old_pid > /dev/null 2>&1; then
+                kill -9 $old_pid 2>/dev/null
+            fi
+        fi
+    fi
+    
+    # 方法2：停止所有bot.py进程
+    local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
+    if [ -n "$bot_pids" ]; then
+        print_message $YELLOW "🔄 发现其他bot进程，正在停止..."
+        echo "$bot_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $YELLOW "   停止进程 PID: $pid"
+                kill $pid 2>/dev/null
+            fi
+        done
+        sleep 3
+        
+        # 强制停止仍在运行的进程
+        bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
+        if [ -n "$bot_pids" ]; then
+            echo "$bot_pids" | while read -r pid; do
+                if [ -n "$pid" ]; then
+                    kill -9 $pid 2>/dev/null
+                fi
+            done
+        fi
+    fi
+    
     # 清理旧的日志和PID文件
     rm -f bot.log bot.pid
+    
+    print_message $GREEN "✅ 环境清理完成，启动新的bot进程..."
     
     # 启动机器人
     nohup $python_cmd bot.py > bot.log 2>&1 &

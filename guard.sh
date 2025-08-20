@@ -54,14 +54,53 @@ check_guard_status() {
 
 # 启动Guard守护进程
 start_guard() {
-    print_message $BLUE "🛡️ 启动 Guard 守护进程..."
+    print_message $BLUE "🛡️ 启动/重启 Guard 守护进程..."
     
-    local status=$(check_guard_status)
-    if [ "$status" = "running" ]; then
-        local pid=$(cat "$GUARD_PID_FILE")
-        print_message $YELLOW "⚠️ Guard 守护进程已在运行 (PID: $pid)"
-        return 0
+    # 后台使用强制重启逻辑，确保清理旧进程
+    # 🔧 强制清理所有guard进程避免冲突
+    print_message $YELLOW "🔄 清理现有guard进程..."
+    
+    # 方法1：通过PID文件停止
+    if [ -f "$GUARD_PID_FILE" ]; then
+        local pid=$(cat "$GUARD_PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+            kill $pid 2>/dev/null || true
+            sleep 3
+            if ps -p $pid > /dev/null 2>&1; then
+                kill -9 $pid 2>/dev/null || true
+            fi
+        fi
     fi
+    
+    # 方法2：停止所有guard.py进程
+    local guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+    if [ -n "$guard_pids" ]; then
+        echo "$guard_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                kill $pid 2>/dev/null || true
+            fi
+        done
+        sleep 3
+        
+        # 强制停止残留进程
+        guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+        if [ -n "$guard_pids" ]; then
+            echo "$guard_pids" | while read -r pid; do
+                if [ -n "$pid" ]; then
+                    kill -9 $pid 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
+    
+    # 方法3：pkill清理
+    pkill -f "guard.py" 2>/dev/null || true
+    
+    # 清理PID文件
+    rm -f "$GUARD_PID_FILE"
+    
+    print_message $GREEN "✅ 进程清理完成，启动新进程..."
+    sleep 2
     
     # 检查依赖
     if ! $PYTHON_CMD -c "import schedule, psutil" 2>/dev/null; then
@@ -119,6 +158,89 @@ stop_guard() {
     
     rm -f "$GUARD_PID_FILE"
     print_message $GREEN "✅ Guard 守护进程已停止"
+}
+
+# 🔧 强制重启Guard守护进程：彻底清理所有guard进程，避免多实例冲突
+force_restart_guard() {
+    print_message $BLUE "🔄 强制重启 Guard 守护进程..."
+    
+    # 🔧 第一步：停止所有guard相关进程
+    print_message $YELLOW "🔄 第一步：彻底清理所有guard进程..."
+    
+    # 方法1：通过PID文件停止
+    if [ -f "$GUARD_PID_FILE" ]; then
+        local pid=$(cat "$GUARD_PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+            print_message $YELLOW "   停止PID文件中的进程 (PID: $pid)..."
+            kill $pid 2>/dev/null || true
+            sleep 3
+            if ps -p $pid > /dev/null 2>&1; then
+                kill -9 $pid 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # 方法2：停止所有guard.py进程
+    local guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+    if [ -n "$guard_pids" ]; then
+        print_message $YELLOW "   发现其他guard进程，正在清理..."
+        echo "$guard_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $YELLOW "     停止进程 PID: $pid"
+                kill $pid 2>/dev/null || true
+            fi
+        done
+        sleep 3
+        
+        # 强制停止残留进程
+        guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+        if [ -n "$guard_pids" ]; then
+            print_message $YELLOW "   强制停止残留进程..."
+            echo "$guard_pids" | while read -r pid; do
+                if [ -n "$pid" ]; then
+                    kill -9 $pid 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
+    
+    # 方法3：pkill清理
+    pkill -f "guard.py" 2>/dev/null || true
+    
+    # 清理文件
+    rm -f "$GUARD_PID_FILE"
+    
+    print_message $GREEN "   ✅ guard进程清理完成"
+    
+    # 🔧 第二步：启动新进程
+    print_message $YELLOW "🔄 第二步：启动新的guard进程..."
+    sleep 2
+    
+    # 检查依赖
+    if ! $PYTHON_CMD -c "import schedule, psutil" 2>/dev/null; then
+        print_message $YELLOW "📦 安装必要依赖..."
+        pip3 install schedule psutil --user
+    fi
+    
+    # 启动守护进程
+    cd "$PROJECT_DIR"
+    nohup $PYTHON_CMD guard.py daemon > "$GUARD_LOG_FILE" 2>&1 &
+    local pid=$!
+    
+    if [ -n "$pid" ]; then
+        echo $pid > "$GUARD_PID_FILE"
+        print_message $GREEN "✅ Guard守护进程强制重启成功 (PID: $pid)"
+        
+        # 验证启动
+        sleep 3
+        if ps -p $pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ Guard进程运行正常"
+        else
+            print_message $RED "❌ Guard进程启动后异常退出，请检查日志"
+        fi
+    else
+        print_message $RED "❌ Guard强制重启失败"
+    fi
 }
 
 # 手动执行自检
@@ -241,9 +363,9 @@ while true; do
             return_to_menu
             ;;
         3)
-            stop_guard
-            sleep 2
-            start_guard
+            print_message $BLUE "🔄 重启 Guard 守护进程..."
+            # 后台使用强制重启逻辑
+            force_restart_guard
             return_to_menu
             ;;
         4)
