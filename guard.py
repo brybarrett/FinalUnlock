@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FinalUnlock Guard 守护程序 v2.0
-自动系统自检和报告发送
+FinalUnlock Guard 守护程序 v2.1
+自动系统自检和报告发送 + 开机自启管理
 作者: AI Assistant
-版本: 2.0
+版本: 2.1
 """
 
 import os
@@ -36,10 +36,21 @@ except ImportError:
     print("请安装python-dotenv: pip install python-dotenv")
     sys.exit(1)
 
+# 异步事件循环支持
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except ImportError:
+    print("请安装nest-asyncio: pip install nest-asyncio")
+    sys.exit(1)
+
 # 配置
 PROJECT_DIR = Path(__file__).parent.absolute()
 PID_FILE = PROJECT_DIR / "bot.pid"
+GUARD_PID_FILE = PROJECT_DIR / "guard.pid"
 BOT_LOG_FILE = PROJECT_DIR / "bot.log"
+SERVICE_NAME = "finalunlock-guard"
+SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 
 # 时区设置
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -52,10 +63,6 @@ def get_log_files():
         'report_file': PROJECT_DIR / f"daily_report_{current_date}.json"
     }
 
-# 删除第323-340行的错误代码：
-# 这些行包含重复的class定义和错误的缩进
-
-# 确保SystemGuard类的完整性，包含以下方法：
 class SystemGuard:
     def __init__(self):
         self.bot_token = os.getenv('BOT_TOKEN')
@@ -241,6 +248,7 @@ class SystemGuard:
             'env_file': {'exists': False, 'valid': False},
             'core_files': {'bot_py': False, 'py_py': False, 'requirements_txt': False, 'guard_py': False},
             'dependencies': {'installed': [], 'missing': []},
+            'autostart': {'enabled': False, 'service_exists': False},
             'status': 'normal',
             'health': '✅'
         }
@@ -270,6 +278,18 @@ class SystemGuard:
                     result['dependencies']['installed'].append(dep)
                 except ImportError:
                     result['dependencies']['missing'].append(dep)
+            
+            # 检查开机自启状态
+            result['autostart']['service_exists'] = Path(SERVICE_FILE).exists()
+            if result['autostart']['service_exists']:
+                try:
+                    check_result = subprocess.run(
+                        ['systemctl', 'is-enabled', SERVICE_NAME],
+                        capture_output=True, text=True
+                    )
+                    result['autostart']['enabled'] = check_result.returncode == 0
+                except:
+                    result['autostart']['enabled'] = False
             
             # 判断状态
             if not result['env_file']['valid'] or result['dependencies']['missing'] or not all(result['core_files'].values()):
@@ -305,9 +325,12 @@ class SystemGuard:
             # 检查Telegram API连接
             if self.bot:
                 try:
-                    asyncio.run(self.bot.get_me())
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self.bot.get_me())
                     result['telegram_api'] = True
-                except:
+                    loop.close()
+                except Exception:
                     result['telegram_api'] = False
             
             if not result['internet'] or not result['telegram_api']:
@@ -323,7 +346,7 @@ class SystemGuard:
         return result
     
     def perform_daily_check(self) -> Dict[str, Any]:
-        """执行每日自检 - 报告文件永久保存"""
+        """执行每日自检"""
         self.logger.info("开始执行每日自检")
         current_time = self.get_current_time()
         
@@ -356,7 +379,7 @@ class SystemGuard:
             report['overall_status'] = 'warning'
             report['overall_health'] = '⚠️'
         
-        # 保存报告 - 按日期命名，永久保存
+        # 保存报告
         log_files = get_log_files()
         report_file = log_files['report_file']
         with open(report_file, 'w', encoding='utf-8') as f:
@@ -375,128 +398,122 @@ class SystemGuard:
 
 ---
 
-## 📊 **报告概览**
+## 📊 报告概览
 
 | 项目 | 值 |
-|------|----|
-| 📅 **检查日期** | `{report['date']}` |
-| ⏰ **检查时间** | `{report['time']} ({report['timezone']})` |
-| 🎯 **整体状态** | {report['overall_health']} **{report['overall_status'].upper()}** |
-| 🔄 **报告版本** | `Guard v2.0` |
+|------|----|  
+| 📅 检查日期 | {report['date']} |
+| ⏰ 检查时间 | {report['time']} ({report['timezone']}) |
+| 🎯 整体状态 | {report['overall_health']} {report['overall_status'].upper()} |
+| 🔄 报告版本 | Guard v2.1 |
 
 ---
 
-## 🔍 **详细检查结果**
+## 🔍 详细检查结果
 
 """
         
         # 机器人进程检查
         bot_check = report['checks']['bot_process']
-        md += f"""### 🤖 **机器人进程状态**
+        md += f"""### 🤖 机器人进程状态
 
 | 检查项 | 状态 | 详情 |
 |--------|------|------|
-| **运行状态** | {bot_check['health']} `{bot_check['status']}` | {bot_check['details']} |
+| 运行状态 | {bot_check['health']} {bot_check['status']} | {bot_check['details']} |
+
+---
+
 """
-        
-        if bot_check['status'] == 'running':
-            md += f"""
-CPU: {report['checks']['bot_process']['cpu_percent']}%
-内存: {report['checks']['bot_process']['memory_mb']} MB
-运行时间: {report['checks']['bot_process']['uptime']}"""
-        
-        md += "\n---\n\n"
         
         # 系统资源检查
         sys_res = report['checks']['system_resources']
         if 'error' not in sys_res:
-            md += f"""### 💻 **系统资源监控**
+            md += f"""### 💻 系统资源监控
 
 | 资源类型 | 使用情况 | 状态 | 详细信息 |
 |----------|----------|------|----------|
-| **CPU** | `{sys_res['cpu_percent']}%` | {sys_res['health']} | 处理器负载 |
-| **内存** | `{sys_res['memory_percent']}%` | {sys_res['health']} | `{sys_res['memory_available_gb']} GB` / `{sys_res['memory_total_gb']} GB` 可用 |
-| **磁盘** | `{sys_res['disk_percent']}%` | {sys_res['health']} | `{sys_res['disk_free_gb']} GB` / `{sys_res['disk_total_gb']} GB` 可用 |
+| CPU | {sys_res['cpu_percent']}% | {sys_res['health']} | 处理器负载 |
+| 内存 | {sys_res['memory_percent']}% | {sys_res['health']} | {sys_res['memory_available_gb']} GB / {sys_res['memory_total_gb']} GB 可用 |
+| 磁盘 | {sys_res['disk_percent']}% | {sys_res['health']} | {sys_res['disk_free_gb']} GB / {sys_res['disk_total_gb']} GB 可用 |
+
+---
 
 """
-        else:
-            md += f"""### 💻 **系统资源监控**
-
-❌ **检查失败**: {sys_res.get('error', '未知错误')}
-
-"""
-        
-        md += "---\n\n"
         
         # 日志文件检查
         log_check = report['checks']['log_files']
-        md += f"""### 📋 **日志文件分析**
+        md += f"""### 📋 日志文件分析
 
 #### 🤖 Bot 日志
 | 项目 | 值 | 状态 |
 |------|----|----- |
-| **文件存在** | {'✅ 是' if log_check['bot_log']['exists'] else '❌ 否'} | {log_check['health']} |
-| **文件大小** | `{log_check['bot_log']['size_mb']} MB` | - |
-| **最后更新** | `{log_check['bot_log']['last_modified'] or '未知'}` | - |
-| **错误数量** | `{log_check['bot_log']['error_count']}` | {'⚠️ 需关注' if log_check['bot_log']['error_count'] > 10 else '✅ 正常'} |
-| **警告数量** | `{log_check['bot_log']['warning_count']}` | {'⚠️ 需关注' if log_check['bot_log']['warning_count'] > 20 else '✅ 正常'} |
+| 文件存在 | {'✅ 是' if log_check['bot_log']['exists'] else '❌ 否'} | {log_check['health']} |
+| 文件大小 | {log_check['bot_log']['size_mb']} MB | - |
+| 最后更新 | {log_check['bot_log']['last_modified'] or '未知'} | - |
+| 错误数量 | {log_check['bot_log']['error_count']} | {'✅ 正常' if log_check['bot_log']['error_count'] <= 10 else '⚠️ 需关注'} |
+| 警告数量 | {log_check['bot_log']['warning_count']} | {'✅ 正常' if log_check['bot_log']['warning_count'] <= 20 else '⚠️ 需关注'} |
 
 #### 🛡️ Guard 日志
 | 项目 | 值 |
 |------|----|  
-| **文件存在** | {'✅ 是' if log_check['guard_log']['exists'] else '❌ 否'} |
-| **文件大小** | `{log_check['guard_log']['size_mb']} MB` |
-| **最后更新** | `{log_check['guard_log']['last_modified'] or '未知'}` |
+| 文件存在 | {'✅ 是' if log_check['guard_log']['exists'] else '❌ 否'} |
+| 文件大小 | {log_check['guard_log']['size_mb']} MB |
+| 最后更新 | {log_check['guard_log']['last_modified'] or '未知'} |
+
+---
 
 """
         
-        md += "---\n\n"
-        
         # 配置检查
         config_check = report['checks']['configuration']
-        md += f"""### ⚙️ **配置文件检查**
+        md += f"""### ⚙️ 配置文件检查
 
 #### 📄 环境配置
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| **`.env` 文件** | {'✅ 存在' if config_check['env_file']['exists'] else '❌ 缺失'} | 环境变量配置文件 |
-| **配置有效性** | {'✅ 有效' if config_check['env_file']['valid'] else '❌ 无效'} | Bot Token 和 Chat ID 配置 |
+| .env 文件 | {'✅ 存在' if config_check['env_file']['exists'] else '❌ 缺失'} | 环境变量配置文件 |
+| 配置有效性 | {'✅ 有效' if config_check['env_file']['valid'] else '❌ 无效'} | Bot Token 和 Chat ID 配置 |
 
 #### 📁 核心文件
 | 文件名 | 状态 | 说明 |
 |--------|------|------|
-| **`bot.py`** | {'✅ 存在' if config_check['core_files']['bot_py'] else '❌ 缺失'} | 主机器人程序 |
-| **`py.py`** | {'✅ 存在' if config_check['core_files']['py_py'] else '❌ 缺失'} | 核心算法模块 |
-| **`guard.py`** | {'✅ 存在' if config_check['core_files']['guard_py'] else '❌ 缺失'} | 守护进程程序 |
-| **`requirements.txt`** | {'✅ 存在' if config_check['core_files']['requirements_txt'] else '❌ 缺失'} | 依赖包列表 |
+| bot.py | {'✅ 存在' if config_check['core_files']['bot_py'] else '❌ 缺失'} | 主机器人程序 |
+| py.py | {'✅ 存在' if config_check['core_files']['py_py'] else '❌ 缺失'} | 核心算法模块 |
+| guard.py | {'✅ 存在' if config_check['core_files']['guard_py'] else '❌ 缺失'} | 守护进程程序 |
+| requirements.txt | {'✅ 存在' if config_check['core_files']['requirements_txt'] else '❌ 缺失'} | 依赖包列表 |
 
 #### 📦 依赖包状态
 | 状态 | 包列表 |
 |------|--------|
-| **✅ 已安装** | `{', '.join(config_check['dependencies']['installed']) if config_check['dependencies']['installed'] else '无'}` |
-| **❌ 缺失** | `{', '.join(config_check['dependencies']['missing']) if config_check['dependencies']['missing'] else '无'}` |
+| ✅ 已安装 | {', '.join(config_check['dependencies']['installed']) if config_check['dependencies']['installed'] else '无'} |
+| ❌ 缺失 | {', '.join(config_check['dependencies']['missing']) if config_check['dependencies']['missing'] else '无'} |
+
+#### 🚀 开机自启状态
+| 项目 | 状态 | 说明 |
+|------|------|------|
+| 服务文件 | {'✅ 存在' if config_check['autostart']['service_exists'] else '❌ 缺失'} | systemd 服务文件 |
+| 开机自启 | {'✅ 已启用' if config_check['autostart']['enabled'] else '❌ 未启用'} | Guard 开机自启状态 |
+
+---
 
 """
-        
-        md += "---\n\n"
         
         # 网络连接检查
         network_check = report['checks']['network']
-        md += f"""### 🌐 **网络连接检查**
+        md += f"""### 🌐 网络连接检查
 
 | 连接类型 | 状态 | 响应时间 | 说明 |
 |----------|------|----------|------|
-| **互联网连接** | {'✅ 正常' if network_check['internet'] else '❌ 异常'} | `{network_check.get('response_time', 0)} ms` | 基础网络连通性 |
-| **Telegram API** | {'✅ 正常' if network_check['telegram_api'] else '❌ 异常'} | - | Bot API 连接状态 |
-| **整体网络** | {network_check['health']} `{network_check['status']}` | - | 综合网络状态 |
+| 互联网连接 | {'✅ 正常' if network_check['internet'] else '❌ 异常'} | {network_check.get('response_time', 0)} ms | 基础网络连通性 |
+| Telegram API | {'✅ 正常' if network_check['telegram_api'] else '❌ 异常'} | - | Bot API 连接状态 |
+| 整体网络 | {network_check['health']} {network_check['status']} | - | 综合网络状态 |
+
+---
 
 """
         
-        # 报告尾部
-        current_time = self.get_current_time()
-        md += f"""---
-
-## 📈 **系统建议**
+        # 系统建议
+        md += """## 📈 系统建议
 
 """
         
@@ -504,135 +521,295 @@ CPU: {report['checks']['bot_process']['cpu_percent']}%
         suggestions = []
         
         if bot_check['status'] != 'running':
-            suggestions.append("🔴 **紧急**: 机器人进程未运行，请立即检查并重启")
+            suggestions.append("- 🔴 紧急: 机器人进程未运行，请立即检查并重启")
         
         if sys_res.get('cpu_percent', 0) > 80:
-            suggestions.append("🟡 **注意**: CPU使用率较高，建议检查系统负载")
+            suggestions.append("- 🟡 注意: CPU使用率较高，建议检查系统负载")
         
         if sys_res.get('memory_percent', 0) > 90:
-            suggestions.append("🟡 **注意**: 内存使用率较高，建议释放内存或增加内存")
+            suggestions.append("- 🟡 注意: 内存使用率较高，建议释放内存")
         
         if sys_res.get('disk_percent', 0) > 90:
-            suggestions.append("🟡 **注意**: 磁盘空间不足，建议清理日志或扩展存储")
+            suggestions.append("- 🟡 注意: 磁盘空间不足，建议清理日志")
         
         if log_check['bot_log']['error_count'] > 10:
-            suggestions.append("🟡 **注意**: Bot日志中错误数量较多，建议检查错误原因")
+            suggestions.append("- 🟡 注意: Bot日志中错误较多，建议检查")
         
         if config_check['dependencies']['missing']:
-            suggestions.append(f"🔴 **紧急**: 缺少依赖包 `{', '.join(config_check['dependencies']['missing'])}`，请安装")
+            suggestions.append("- 🟡 注意: 存在缺失的依赖包，建议安装")
         
-        if not network_check['internet'] or not network_check['telegram_api']:
-            suggestions.append("🔴 **紧急**: 网络连接异常，请检查网络配置")
+        if not network_check['telegram_api']:
+            suggestions.append("- 🔴 紧急: Telegram API连接异常，请检查网络")
+        
+        if not config_check['autostart']['enabled']:
+            suggestions.append("- 🟡 建议: 启用Guard开机自启，确保系统重启后自动运行")
         
         if not suggestions:
-            suggestions.append("✅ **良好**: 系统运行正常，无需特别关注")
+            suggestions.append("- ✅ 系统运行正常，无需特别关注")
         
-        for suggestion in suggestions:
-            md += f"- {suggestion}\n"
+        md += "\n".join(suggestions)
         
-        md += f"""\n---
-
-## 📞 **联系信息**
-
-- 🤖 **获取最新报告**: 发送 `/guard` 命令
-- ⏰ **自动报告时间**: 每天 `07:00` (Asia/Shanghai)
-- 🔍 **自检执行时间**: 每天 `00:00` (Asia/Shanghai)
-- 📋 **报告生成时间**: `{current_time.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Shanghai)`
+        # 报告尾部
+        current_time = self.get_current_time()
+        md += f"""
 
 ---
 
-*🛡️ 本报告由 FinalUnlock Guard v2.0 自动生成*
-"""
+## 📞 联系信息
+
+- 🤖 获取最新报告: 发送 /guard 命令
+- ⏰ 自动报告时间: 每天 07:00 (Asia/Shanghai)
+- 🔍 自检执行时间: 每天 00:00 (Asia/Shanghai)
+- 📋 报告生成时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')} (Asia/Shanghai)
+
+---
+
+🛡️ 本报告由 FinalUnlock Guard v2.1 自动生成"""
         
         return md
     
     async def send_report(self, report: Dict[str, Any] = None, is_initial: bool = False):
         """发送报告到Telegram"""
-        if report is None:
-            # 查找最新的报告文件
-            current_date = datetime.now(SHANGHAI_TZ).strftime('%Y%m%d')
-            report_file = PROJECT_DIR / f"daily_report_{current_date}.json"
+        try:
+            if report is None:
+                # 查找最新的报告文件
+                current_date = datetime.now(SHANGHAI_TZ).strftime('%Y%m%d')
+                report_file = PROJECT_DIR / f"daily_report_{current_date}.json"
+                
+                if report_file.exists():
+                    with open(report_file, 'r', encoding='utf-8') as f:
+                        report = json.load(f)
+                else:
+                    self.logger.error("没有找到今日报告文件")
+                    return False
             
-            if report_file.exists():
-                with open(report_file, 'r', encoding='utf-8') as f:
-                    report = json.load(f)
-            else:
-                self.logger.error("没有找到今日报告文件")
-                return
-        
-        # 生成Markdown报告
-        message = self.generate_markdown_report(report)
-        
-        # 添加初始安装提示
-        if is_initial:
-            initial_msg = """🎉 **FinalUnlock 项目安装完成！**
+            # 生成Markdown报告
+            message = self.generate_markdown_report(report)
+            
+            # 添加初始安装提示
+            if is_initial:
+                initial_msg = """🎉 FinalUnlock 项目安装完成！
 
 ✅ 系统已成功安装并配置完成
 ✅ Guard 守护程序已启动
 ✅ 自动自检功能已激活
+✅ 开机自启功能已配置
 
-📋 **自动化时间表**:
-- 🕛 **每天 00:00**: 执行全面系统自检
-- 🕖 **每天 07:00**: 自动发送详细报告
-- 🤖 **随时可用**: 发送 `/guard` 获取最新报告
+📋 自动化时间表:
+- 🕛 每天 00:00: 执行全面系统自检
+- 🕖 每天 07:00: 自动发送详细报告
+- 🤖 随时可用: 发送 /guard 获取最新报告
+- 🚀 开机自启: 系统重启后自动运行
 
 ---
 
 """
-            message = initial_msg + message
+                message = initial_msg + message
+            
+            success_count = 0
+            for chat_id in self.chat_ids:
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode='Markdown'
+                    )
+                    success_count += 1
+                    self.logger.info(f"报告已发送到 {chat_id}")
+                except TelegramError as e:
+                    self.logger.error(f"发送报告到 {chat_id} 失败: {e}")
+                except Exception as e:
+                    self.logger.error(f"发送报告时出现未知错误: {e}")
+            
+            self.logger.info(f"报告发送完成，成功: {success_count}/{len(self.chat_ids)}")
+            return success_count > 0
+            
+        except Exception as e:
+            self.logger.error(f"发送报告过程中出现错误: {e}")
+            return False
+    
+    def send_report_sync(self, report=None, is_initial=False):
+        """同步方式发送报告"""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(self.send_report(report, is_initial))
+            loop.close()
+            return result
+        except Exception as e:
+            self.logger.error(f"同步发送报告失败: {e}")
+            return False
+    
+    def setup_autostart(self) -> bool:
+        """设置开机自启"""
+        try:
+            self.logger.info("开始设置Guard开机自启...")
+            
+            # 创建systemd服务文件内容
+            service_content = f"""[Unit]
+Description=FinalUnlock Guard Daemon
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={PROJECT_DIR}
+Environment=PATH={PROJECT_DIR}/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/bash -c 'cd {PROJECT_DIR} && source venv/bin/activate'
+ExecStart=/bin/bash -c 'cd {PROJECT_DIR} && source venv/bin/activate && python guard.py daemon'
+ExecStop=/bin/bash -c 'if [ -f {GUARD_PID_FILE} ]; then kill $(cat {GUARD_PID_FILE}); rm -f {GUARD_PID_FILE}; fi'
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
+            
+            # 写入临时文件
+            temp_service_file = f'/tmp/{SERVICE_NAME}.service'
+            with open(temp_service_file, 'w') as f:
+                f.write(service_content)
+            
+            # 复制到systemd目录
+            subprocess.run(['sudo', 'cp', temp_service_file, SERVICE_FILE], check=True)
+            
+            # 设置权限
+            subprocess.run(['sudo', 'chmod', '644', SERVICE_FILE], check=True)
+            
+            # 重新加载systemd
+            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+            
+            # 启用服务
+            subprocess.run(['sudo', 'systemctl', 'enable', SERVICE_NAME], check=True)
+            
+            # 清理临时文件
+            os.remove(temp_service_file)
+            
+            self.logger.info("Guard开机自启设置成功")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"设置开机自启失败 (命令执行错误): {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"设置开机自启失败: {e}")
+            return False
+    
+    def remove_autostart(self) -> bool:
+        """移除开机自启"""
+        try:
+            self.logger.info("开始移除Guard开机自启...")
+            
+            # 停止服务
+            subprocess.run(['sudo', 'systemctl', 'stop', SERVICE_NAME], check=False)
+            
+            # 禁用服务
+            subprocess.run(['sudo', 'systemctl', 'disable', SERVICE_NAME], check=False)
+            
+            # 删除服务文件
+            if Path(SERVICE_FILE).exists():
+                subprocess.run(['sudo', 'rm', SERVICE_FILE], check=True)
+            
+            # 重新加载systemd
+            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+            
+            self.logger.info("Guard开机自启已移除")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"移除开机自启失败 (命令执行错误): {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"移除开机自启失败: {e}")
+            return False
+    
+    def check_autostart_status(self) -> Dict[str, Any]:
+        """检查开机自启状态"""
+        result = {
+            'service_exists': False,
+            'enabled': False,
+            'active': False,
+            'status': 'unknown'
+        }
         
-        success_count = 0
-        for chat_id in self.chat_ids:
-            try:
-                await self.bot.send_message(
-                    chat_id=chat_id,
-                    text=message,
-                    parse_mode='Markdown'
+        try:
+            # 检查服务文件是否存在
+            result['service_exists'] = Path(SERVICE_FILE).exists()
+            
+            if result['service_exists']:
+                # 检查是否启用
+                check_enabled = subprocess.run(
+                    ['systemctl', 'is-enabled', SERVICE_NAME],
+                    capture_output=True, text=True
                 )
-                success_count += 1
-                self.logger.info(f"报告已发送到 {chat_id}")
-            except TelegramError as e:
-                self.logger.error(f"发送报告到 {chat_id} 失败: {e}")
-            except Exception as e:
-                self.logger.error(f"发送报告时出现未知错误: {e}")
+                result['enabled'] = check_enabled.returncode == 0
+                
+                # 检查是否活跃
+                check_active = subprocess.run(
+                    ['systemctl', 'is-active', SERVICE_NAME],
+                    capture_output=True, text=True
+                )
+                result['active'] = check_active.returncode == 0
+                
+                # 获取状态
+                if result['enabled'] and result['active']:
+                    result['status'] = 'running'
+                elif result['enabled']:
+                    result['status'] = 'enabled'
+                else:
+                    result['status'] = 'disabled'
+            else:
+                result['status'] = 'not_installed'
+                
+        except Exception as e:
+            self.logger.error(f"检查开机自启状态失败: {e}")
+            result['status'] = 'error'
         
-        self.logger.info(f"报告发送完成，成功: {success_count}/{len(self.chat_ids)}")
-        return success_count > 0
+        return result
     
     def schedule_tasks(self):
         """安排定时任务"""
         # 每天0点执行自检
         schedule.every().day.at("00:00").do(self.perform_daily_check)
         
-        # 每天7点发送报告
-        schedule.every().day.at("07:00").do(lambda: asyncio.run(self.send_report()))
+        # 每天7点发送报告 - 使用同步方式
+        schedule.every().day.at("07:00").do(self.send_report_sync)
         
         self.logger.info("定时任务已安排: 0点自检，7点发送报告")
     
     def run_daemon(self):
         """运行守护进程"""
-        self.logger.info("Guard 守护进程启动")
-        
-        # 安排定时任务
-        self.schedule_tasks()
-        
-        # 启动时执行一次自检（如果是首次运行）
-        current_date = datetime.now(SHANGHAI_TZ).strftime('%Y%m%d')
-        report_file = PROJECT_DIR / f"daily_report_{current_date}.json"
-        if not report_file.exists():
-            self.logger.info("首次运行，执行初始自检")
-            self.perform_daily_check()
-        
-        # 主循环
         try:
+            self.logger.info("Guard 守护进程启动")
+            
+            # 保存PID
+            with open(GUARD_PID_FILE, 'w') as f:
+                f.write(str(os.getpid()))
+            
+            # 安排定时任务
+            self.schedule_tasks()
+            
+            # 首次运行时执行自检
+            if not any(PROJECT_DIR.glob("daily_report_*.json")):
+                self.logger.info("首次运行，执行初始自检")
+                self.perform_daily_check()
+            
+            # 主循环
             while True:
                 schedule.run_pending()
                 time.sleep(60)  # 每分钟检查一次
+                
         except KeyboardInterrupt:
             self.logger.info("收到中断信号，Guard 守护进程停止")
         except Exception as e:
-            self.logger.error(f"Guard 守护进程异常: {e}")
-            raise
+            self.logger.error(f"Guard 守护进程运行出错: {e}")
+        finally:
+            # 清理PID文件
+            if GUARD_PID_FILE.exists():
+                GUARD_PID_FILE.unlink()
 
 def main():
     """主函数"""
@@ -648,25 +825,94 @@ def main():
             
         elif command == "report":
             # 手动发送报告
-            success = asyncio.run(guard.send_report())
+            success = guard.send_report_sync()
             print("报告发送完成" if success else "报告发送失败")
             
         elif command == "initial":
             # 初始安装后发送报告
             report = guard.perform_daily_check()
-            success = asyncio.run(guard.send_report(report, is_initial=True))
+            success = guard.send_report_sync(report, is_initial=True)
             print("初始报告发送完成" if success else "初始报告发送失败")
             
         elif command == "daemon":
             # 运行守护进程
             guard.run_daemon()
             
+        elif command == "autostart":
+            # 设置开机自启
+            if guard.setup_autostart():
+                print("✅ Guard开机自启设置成功")
+                print("💡 服务管理命令:")
+                print(f"   启动: sudo systemctl start {SERVICE_NAME}")
+                print(f"   停止: sudo systemctl stop {SERVICE_NAME}")
+                print(f"   状态: sudo systemctl status {SERVICE_NAME}")
+                print(f"   日志: journalctl -u {SERVICE_NAME} -f")
+            else:
+                print("❌ Guard开机自启设置失败")
+                
+        elif command == "remove-autostart":
+            # 移除开机自启
+            if guard.remove_autostart():
+                print("✅ Guard开机自启已移除")
+            else:
+                print("❌ 移除Guard开机自启失败")
+                
+        elif command == "status":
+            # 检查开机自启状态
+            status = guard.check_autostart_status()
+            print(f"📊 Guard开机自启状态:")
+            print(f"   服务文件: {'✅ 存在' if status['service_exists'] else '❌ 不存在'}")
+            print(f"   开机自启: {'✅ 已启用' if status['enabled'] else '❌ 未启用'}")
+            print(f"   运行状态: {'✅ 运行中' if status['active'] else '❌ 未运行'}")
+            print(f"   整体状态: {status['status']}")
+            
+        elif command == "start":
+            # 启动服务
+            try:
+                subprocess.run(['sudo', 'systemctl', 'start', SERVICE_NAME], check=True)
+                print("✅ Guard服务启动成功")
+            except subprocess.CalledProcessError:
+                print("❌ Guard服务启动失败")
+                
+        elif command == "stop":
+            # 停止服务
+            try:
+                subprocess.run(['sudo', 'systemctl', 'stop', SERVICE_NAME], check=True)
+                print("✅ Guard服务停止成功")
+            except subprocess.CalledProcessError:
+                print("❌ Guard服务停止失败")
+                
+        elif command == "restart":
+            # 重启服务
+            try:
+                subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
+                print("✅ Guard服务重启成功")
+            except subprocess.CalledProcessError:
+                print("❌ Guard服务重启失败")
+            
         else:
-            print("用法: python guard.py [check|report|initial|daemon]")
-            print("  check   - 执行自检")
-            print("  report  - 发送报告")
-            print("  initial - 发送初始安装报告")
-            print("  daemon  - 运行守护进程")
+            print("用法: python guard.py [命令]")
+            print("")
+            print("可用命令:")
+            print("  check           - 执行系统自检")
+            print("  report          - 发送报告到Telegram")
+            print("  initial         - 发送初始安装报告")
+            print("  daemon          - 运行守护进程")
+            print("")
+            print("开机自启管理:")
+            print("  autostart       - 设置开机自启")
+            print("  remove-autostart - 移除开机自启")
+            print("  status          - 检查开机自启状态")
+            print("")
+            print("服务管理:")
+            print("  start           - 启动Guard服务")
+            print("  stop            - 停止Guard服务")
+            print("  restart         - 重启Guard服务")
+            print("")
+            print("示例:")
+            print("  python guard.py daemon          # 运行守护进程")
+            print("  python guard.py autostart       # 设置开机自启")
+            print("  python guard.py status          # 查看状态")
     else:
         # 默认运行守护进程
         guard = SystemGuard()
@@ -674,28 +920,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# 在guard.py中找到发送报告的函数，添加事件循环处理
-import asyncio
-import nest_asyncio
-
-# 在发送报告函数开始处添加
-def send_report_to_telegram(report_content, chat_ids):
-    try:
-        # 修复事件循环问题
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # 使用nest_asyncio允许嵌套事件循环
-        nest_asyncio.apply()
-        
-        # 其余发送逻辑...
-        
-    except Exception as e:
-        logger.error(f"发送报告失败: {e}")
