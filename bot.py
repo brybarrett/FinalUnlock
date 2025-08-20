@@ -16,6 +16,9 @@ from datetime import datetime
 shutdown_flag = False
 app = None
 
+# PID文件管理
+PID_FILE = os.path.join(os.path.dirname(__file__), 'bot.pid')
+
 # 配置更详细的日志
 logging.basicConfig(
     filename='bot.log',
@@ -41,6 +44,25 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = handle_exception
 
+# PID文件管理函数
+def create_pid_file():
+    """创建PID文件"""
+    try:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info(f'PID文件已创建: {PID_FILE}')
+    except Exception as e:
+        logger.error(f'创建PID文件失败: {e}')
+
+def remove_pid_file():
+    """删除PID文件"""
+    try:
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+            logger.info(f'PID文件已删除: {PID_FILE}')
+    except Exception as e:
+        logger.error(f'删除PID文件失败: {e}')
+
 # 信号处理器
 def signal_handler(signum, frame):
     global shutdown_flag, app
@@ -48,6 +70,7 @@ def signal_handler(signum, frame):
     shutdown_flag = True
     if app:
         app.stop_running()
+    remove_pid_file()  # 清理PID文件
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
@@ -572,6 +595,9 @@ if __name__ == '__main__':
         
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
+        # 创建PID文件
+        create_pid_file()
+        
         # 错误处理器
         async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.error(f"更新处理出错: {context.error}", exc_info=context.error)
@@ -605,19 +631,18 @@ if __name__ == '__main__':
         # 🔧 修复：使用兼容v20.0+的参数
         app.run_polling(
             drop_pending_updates=True,
-            allowed_updates=None,
             timeout=30,
-            bootstrap_retries=-1,
-            read_timeout=None,
-            write_timeout=None,
-            connect_timeout=None,
-            pool_timeout=None
+            bootstrap_retries=3
         )
         
     except KeyboardInterrupt:
         logger.info("收到键盘中断，正在关闭...")
+        remove_pid_file()
     except Exception as e:
         logger.critical(f"机器人启动失败: {e}", exc_info=True)
+        remove_pid_file()
         sys.exit(1)
     finally:
+        # 确保PID文件被清理
+        remove_pid_file()
         logger.info("机器人已关闭")

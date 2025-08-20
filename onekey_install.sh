@@ -925,8 +925,8 @@ show_management_menu() {
                 print_message $RED "⚠️ 完整卸载FinalUnlock机器人"
                 print_message $RED "⚠️ 这将删除所有文件和依赖，操作不可逆！"
                 echo
-                read -p "请输入 'UNINSTALL' 确认完整卸载: " confirm
-                if [ "$confirm" = "UNINSTALL" ]; then
+                read -p "确认完整卸载？(yes/no): " confirm
+                if [ "$confirm" = "yes" ] || [ "$confirm" = "YES" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
                     if [ -n "$project_dir" ]; then
                         cd "$project_dir"
                         if [ -f "start.sh" ]; then

@@ -1969,9 +1969,9 @@ uninstall_bot() {
         1)
             print_message $BLUE "🔄 选择完整卸载模式"
             echo
-            read -p "请输入 'UNINSTALL' 确认完整卸载: " confirm
+            read -p "确认完整卸载？(yes/no): " confirm
             
-            if [ "$confirm" != "UNINSTALL" ]; then
+            if [ "$confirm" != "yes" ] && [ "$confirm" != "YES" ] && [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
                 print_message $YELLOW "❌ 取消卸载操作"
                 return
             fi
