@@ -931,36 +931,51 @@ show_management_menu() {
                         cd "$project_dir"
                         if [ -f "start.sh" ]; then
                             print_message $BLUE "🔄 执行完整卸载..."
-                            bash start.sh --uninstall-complete 2>/dev/null || {
-                                # 如果start.sh不支持--uninstall-complete，则手动卸载
-                                print_message $YELLOW "🔄 使用备用卸载方法..."
-                                
-                                # 停止所有进程
-                                pkill -f "bot.py" 2>/dev/null || true
-                                pkill -f "guard.py" 2>/dev/null || true
-                                
-                                # 卸载依赖
-                                if [ -f "requirements.txt" ]; then
-                                    print_message $YELLOW "🔄 卸载Python依赖..."
-                                    pip uninstall -y -r requirements.txt 2>/dev/null || true
-                                fi
-                                
-                                # 删除服务
-                                sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
-                                sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
-                                sudo rm -f /etc/systemd/system/finalunlock-bot.service 2>/dev/null || true
-                                sudo systemctl daemon-reload 2>/dev/null || true
-                                
-                                # 删除全局命令
-                                sudo rm -f /usr/local/bin/fn-bot 2>/dev/null || true
-                                rm -f "$HOME/.local/bin/fn-bot" 2>/dev/null || true
-                                
-                                # 删除项目目录
-                                cd ..
-                                rm -rf "$project_dir"
-                                
-                                print_message $GREEN "✅ 卸载完成"
-                            }
+                            
+                            # 停止所有进程
+                            print_message $YELLOW "🛑 停止所有相关进程..."
+                            pkill -f "bot.py" 2>/dev/null || true
+                            pkill -f "guard.py" 2>/dev/null || true
+                            
+                            # 删除PID文件
+                            rm -f "bot.pid" 2>/dev/null || true
+                            rm -f "guard.pid" 2>/dev/null || true
+                            rm -f "monitor.pid" 2>/dev/null || true
+                            
+                            # 卸载Python依赖
+                            if [ -f "requirements.txt" ]; then
+                                print_message $YELLOW "🔄 卸载Python依赖..."
+                                while read -r line; do
+                                    if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+                                        package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+                                        pip uninstall -y "$package_name" 2>/dev/null || true
+                                    fi
+                                done < requirements.txt
+                            fi
+                            
+                            # 删除systemd服务
+                            print_message $YELLOW "🔄 删除systemd服务..."
+                            sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
+                            sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
+                            sudo rm -f /etc/systemd/system/finalunlock-bot.service 2>/dev/null || true
+                            sudo systemctl daemon-reload 2>/dev/null || true
+                            
+                            # 删除全局命令
+                            print_message $YELLOW "🔄 删除全局命令..."
+                            sudo rm -f /usr/local/bin/fn-bot 2>/dev/null || true
+                            rm -f "$HOME/.local/bin/fn-bot" 2>/dev/null || true
+                            
+                            # 删除虚拟环境
+                            if [ -d "venv" ]; then
+                                print_message $YELLOW "🔄 删除虚拟环境..."
+                                rm -rf "venv"
+                            fi
+                            
+                            # 删除项目目录
+                            cd ..
+                            rm -rf "$project_dir"
+                            
+                            print_message $GREEN "✅ 完整卸载完成"
                         else
                             print_message $RED "❌ 未找到start.sh文件"
                         fi
@@ -1012,6 +1027,128 @@ show_management_menu() {
     done
 }
 
+# 自动系统修复
+auto_system_fix() {
+    print_message $BLUE "🔍 执行系统自动检测和修复..."
+    
+    # 进入项目目录
+    if [ -n "$project_dir" ] && [ -d "$project_dir" ]; then
+        cd "$project_dir"
+        
+        # 自动修复1：检查并创建日志文件
+        local log_file="$project_dir/bot.log"
+        if [ ! -f "$log_file" ]; then
+            print_message $YELLOW "⚠️ 日志文件不存在，正在自动创建..."
+            touch "$log_file"
+            print_message $GREEN "✅ 日志文件已创建"
+        fi
+        
+        # 自动修复2：检查机器人进程
+        local pid_file="$project_dir/bot.pid"
+        local need_start=0
+        if [ -f "$project_dir/.env" ]; then
+            if [ ! -f "$pid_file" ]; then
+                need_start=1
+            else
+                local pid=$(cat "$pid_file" 2>/dev/null)
+                if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
+                    need_start=1
+                fi
+            fi
+            if [ $need_start -eq 1 ]; then
+                print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
+                # 尝试启动机器人
+                if [ -f "bot.py" ]; then
+                    nohup python3 bot.py >> "$log_file" 2>&1 &
+                    local new_pid=$!
+                    echo $new_pid > "$pid_file"
+                    sleep 2
+                    if ps -p $new_pid > /dev/null 2>&1; then
+                        print_message $GREEN "✅ 机器人自动启动成功 (PID: $new_pid)"
+                    else
+                        print_message $RED "❌ 机器人自动启动失败"
+                        rm -f "$pid_file"
+                    fi
+                fi
+            else
+                print_message $GREEN "✅ 机器人进程正常运行"
+            fi
+        fi
+        
+        # 自动修复3：检查systemd服务
+        if command -v systemctl &> /dev/null; then
+            if ! systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
+                print_message $YELLOW "🔄 systemd服务未启用，正在自动创建..."
+                # 尝试创建服务（如果有sudo权限）
+                if sudo -n true 2>/dev/null; then
+                    local script_path="$project_dir/start.sh"
+                    sudo tee /etc/systemd/system/finalunlock-bot.service > /dev/null << EOF
+[Unit]
+Description=FinalUnlock Bot Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=$USER
+Group=$USER
+WorkingDirectory=$project_dir
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:\$PATH
+ExecStart=$script_path --daemon
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=finalunlock-bot
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                    sudo systemctl daemon-reload 2>/dev/null
+                    sudo systemctl enable finalunlock-bot.service 2>/dev/null
+                    print_message $GREEN "✅ systemd服务自动创建成功"
+                else
+                    print_message $YELLOW "⚠️ systemd服务创建跳过（需要sudo权限）"
+                fi
+            else
+                print_message $GREEN "✅ systemd服务状态正常"
+            fi
+        fi
+        
+        print_message $GREEN "🎉 系统自动检测和修复完成"
+    
+    # 额外的依赖优化检查
+    if [ -f "$project_dir/requirements.txt" ]; then
+        # 检查是否真的需要重新安装依赖
+        local all_deps_installed=true
+        while read -r line; do
+            if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+                package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+                # 转换包名到Python模块名
+                case $package_name in
+                    "python-telegram-bot") module_name="telegram" ;;
+                    "python-dotenv") module_name="dotenv" ;;
+                    "pycryptodome") module_name="Crypto" ;;
+                    "nest-asyncio") module_name="nest_asyncio" ;;
+                    *) module_name="$package_name" ;;
+                esac
+                
+                if ! python3 -c "import $module_name" 2>/dev/null; then
+                    all_deps_installed=false
+                    break
+                fi
+            fi
+        done < "$project_dir/requirements.txt"
+        
+        if [ "$all_deps_installed" = true ]; then
+            print_message $GREEN "💡 依赖环境已优化，无需重复安装"
+        fi
+    fi
+    else
+        print_message $RED "❌ 未找到项目目录，跳过自动修复"
+    fi
+}
+
 # ==========================================
 # 主执行流程
 # ==========================================
@@ -1047,7 +1184,10 @@ main() {
     # 第八步：显示完成
     show_completion
     
-    # 🆕 第九步：显示管理菜单（不自动退出）
+    # 🆕 第九步：自动系统修复
+    auto_system_fix
+    
+    # 🆕 第十步：显示管理菜单（不自动退出）
     show_management_menu
 }
 

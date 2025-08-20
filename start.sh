@@ -1982,6 +1982,10 @@ uninstall_bot() {
             
             # 然后删除项目文件
             uninstall_project_files
+            
+            # 卸载完成后直接退出
+            print_message $GREEN "👋 FinalUnlock已完全卸载"
+            emergency_exit
             ;;
         2)
             print_message $BLUE "🔄 选择仅删除项目文件模式"
@@ -1995,6 +1999,10 @@ uninstall_bot() {
             
             # 仅删除项目文件
             uninstall_project_files
+            
+            # 删除完成后直接退出
+            print_message $GREEN "👋 项目文件已删除"
+            emergency_exit
             ;;
         0)
             print_message $YELLOW "❌ 取消卸载操作"
@@ -2484,6 +2492,60 @@ EOF
         print_message $RED "❌ 服务文件创建失败"
         return 1
     fi
+}
+
+# 创建systemd服务（静默版本，用于自动修复）
+create_systemd_service_silent() {
+    # 检查是否为Linux环境
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
+        return 1
+    fi
+    
+    # 检查systemd是否可用
+    if ! command -v systemctl &> /dev/null; then
+        return 1
+    fi
+    
+    local service_name="finalunlock-bot"
+    local service_file="/etc/systemd/system/${service_name}.service"
+    local script_path="$PROJECT_DIR/start.sh"
+    
+    # 创建systemd服务文件（尝试不需要交互）
+    if sudo -n true 2>/dev/null; then
+        # 有sudo无密码权限
+        sudo tee "$service_file" > /dev/null << EOF
+[Unit]
+Description=FinalUnlock Bot Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=$USER
+Group=$USER
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:\$PATH
+ExecStart=$script_path --daemon
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=finalunlock-bot
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        
+        if [ $? -eq 0 ]; then
+            # 重新加载systemd并启用服务
+            sudo systemctl daemon-reload 2>/dev/null
+            sudo systemctl enable "$service_name.service" 2>/dev/null
+            return 0
+        fi
+    fi
+    
+    return 1
 }
 
 # 检查systemd服务状态
@@ -3134,12 +3196,121 @@ show_menu() {
 
 # 快速检查依赖（不安装）
 quick_check_dependencies() {
-    # 检查主要依赖是否已安装
-    if $PYTHON_CMD -c "import telegram, dotenv, Crypto" 2>/dev/null; then
-        return 0  # 所有依赖都已安装
-    else
-        return 1  # 有依赖缺失
+    # 检查主要依赖是否已安装（更全面的检查）
+    local missing_count=0
+    
+    # 检查核心依赖包
+    if ! $PYTHON_CMD -c "import telegram" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
     fi
+    
+    if ! $PYTHON_CMD -c "import dotenv" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
+    fi
+    
+    if ! $PYTHON_CMD -c "import Crypto" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
+    fi
+    
+    if ! $PYTHON_CMD -c "import schedule" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
+    fi
+    
+    if ! $PYTHON_CMD -c "import psutil" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
+    fi
+    
+    if ! $PYTHON_CMD -c "import nest_asyncio" 2>/dev/null; then
+        missing_count=$((missing_count + 1))
+    fi
+    
+    # 如果缺失依赖数量少于2个，认为环境基本可用（可能只是个别包版本问题）
+    if [ $missing_count -eq 0 ]; then
+        return 0  # 所有依赖都已安装
+    elif [ $missing_count -le 2 ]; then
+        # 少量缺失，只安装缺失的
+        return 2  # 部分缺失
+    else
+        return 1  # 大量缺失，需要完整安装
+    fi
+}
+
+# 只安装缺失的依赖包（精确安装）
+install_missing_dependencies_only() {
+    local missing_deps=()
+    
+    # 检查并收集缺失的依赖
+    if ! $PYTHON_CMD -c "import telegram" 2>/dev/null; then
+        missing_deps+=("python-telegram-bot")
+    fi
+    
+    if ! $PYTHON_CMD -c "import dotenv" 2>/dev/null; then
+        missing_deps+=("python-dotenv")
+    fi
+    
+    if ! $PYTHON_CMD -c "import Crypto" 2>/dev/null; then
+        missing_deps+=("pycryptodome")
+    fi
+    
+    if ! $PYTHON_CMD -c "import schedule" 2>/dev/null; then
+        missing_deps+=("schedule")
+    fi
+    
+    if ! $PYTHON_CMD -c "import psutil" 2>/dev/null; then
+        missing_deps+=("psutil")
+    fi
+    
+    if ! $PYTHON_CMD -c "import nest_asyncio" 2>/dev/null; then
+        missing_deps+=("nest-asyncio")
+    fi
+    
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 实际上没有缺失的依赖"
+        return 0
+    fi
+    
+    print_message $CYAN "📋 将安装以下缺失的依赖包:"
+    for dep in "${missing_deps[@]}"; do
+        echo -e "  ${CYAN}• $dep${NC}"
+    done
+    
+    # 确保pip命令可用
+    if [ -z "$PIP_CMD" ]; then
+        print_message $YELLOW "⚠️ pip命令未设置，重新检测..."
+        check_python
+    fi
+    
+    # 逐个安装缺失的依赖
+    local success_count=0
+    local failed_count=0
+    
+    for dep in "${missing_deps[@]}"; do
+        print_message $CYAN "🔄 安装 $dep..."
+        if $PIP_CMD install "$dep" --user 2>/dev/null; then
+            print_message $GREEN "✅ $dep 安装成功"
+            success_count=$((success_count + 1))
+        else
+            print_message $YELLOW "⚠️ $dep 安装失败，尝试其他方法..."
+            # 尝试不带--user标志
+            if $PIP_CMD install "$dep" 2>/dev/null; then
+                print_message $GREEN "✅ $dep 安装成功（系统级）"
+                success_count=$((success_count + 1))
+            else
+                print_message $RED "❌ $dep 安装失败"
+                failed_count=$((failed_count + 1))
+            fi
+        fi
+    done
+    
+    echo
+    print_message $BLUE "📊 精确安装结果统计:"
+    print_message $GREEN "✅ 成功安装: $success_count 个依赖"
+    if [ $failed_count -gt 0 ]; then
+        print_message $RED "❌ 安装失败: $failed_count 个依赖"
+        print_message $YELLOW "💡 建议使用 [6] 检查/修复依赖 功能进行完整检查"
+    fi
+    
+    return 0
 }
 
 # 检查并激活虚拟环境
@@ -3213,6 +3384,52 @@ main() {
         # 启动机器人
         start_bot
         exit 0
+    elif [ "$1" = "--uninstall-complete" ]; then
+        # 完整卸载模式
+        print_message $RED "🗑️ 执行完整卸载..."
+        
+        # 停止所有进程
+        print_message $YELLOW "🛑 停止所有相关进程..."
+        pkill -f "bot.py" 2>/dev/null || true
+        pkill -f "guard.py" 2>/dev/null || true
+        
+        # 删除PID文件
+        rm -f "$PROJECT_DIR/bot.pid" 2>/dev/null || true
+        rm -f "$PROJECT_DIR/guard.pid" 2>/dev/null || true
+        rm -f "$PROJECT_DIR/monitor.pid" 2>/dev/null || true
+        
+        # 卸载Python依赖
+        if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+            print_message $YELLOW "🔄 卸载Python依赖..."
+            while read -r line; do
+                if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+                    package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+                    pip uninstall -y "$package_name" 2>/dev/null || true
+                fi
+            done < "$PROJECT_DIR/requirements.txt"
+        fi
+        
+        # 删除systemd服务
+        print_message $YELLOW "🔄 删除systemd服务..."
+        sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
+        sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/finalunlock-bot.service 2>/dev/null || true
+        sudo systemctl daemon-reload 2>/dev/null || true
+        
+        # 删除全局命令
+        print_message $YELLOW "🔄 删除全局命令..."
+        sudo rm -f /usr/local/bin/fn-bot 2>/dev/null || true
+        rm -f "$HOME/.local/bin/fn-bot" 2>/dev/null || true
+        
+        # 删除虚拟环境
+        if [ -d "$PROJECT_DIR/venv" ]; then
+            print_message $YELLOW "🔄 删除虚拟环境..."
+            rm -rf "$PROJECT_DIR/venv"
+        fi
+        
+        print_message $GREEN "✅ 完整卸载完成"
+        print_message $GREEN "👋 FinalUnlock已完全卸载"
+        exit 0
     fi
     
     # 检查并激活虚拟环境
@@ -3261,17 +3478,26 @@ main() {
         exit 1
     fi
     
-    # 快速检查依赖，只在缺失时才安装
-    if ! quick_check_dependencies; then
-        print_message $YELLOW "⚠️ 检测到缺失依赖，正在安装..."
-        install_dependencies
-        if [ $? -ne 0 ]; then
-            print_message $RED "❌ 依赖安装失败"
-            exit 1
-        fi
-    else
-        print_message $GREEN "✅ 依赖检查通过"
-    fi
+    # 智能检查依赖，只在必要时才安装
+    quick_check_dependencies
+    local dep_status=$?
+    case $dep_status in
+        0)
+            print_message $GREEN "✅ 所有依赖包已安装"
+            ;;
+        1)
+            print_message $YELLOW "⚠️ 检测到大量缺失依赖，正在安装..."
+            install_dependencies
+            if [ $? -ne 0 ]; then
+                print_message $RED "❌ 依赖安装失败"
+                exit 1
+            fi
+            ;;
+        2)
+            print_message $BLUE "🔍 检测到少量缺失依赖，正在精确安装..."
+            install_missing_dependencies_only
+            ;;
+    esac
     
     # 检查环境配置
     if [ ! -f "$ENV_FILE" ]; then
@@ -3308,7 +3534,18 @@ main() {
         print_message $GREEN "✅ 环境配置已存在"
     fi
     
-    # ====== 新增：自动检测并后台启动bot ======
+    # ====== 自动系统检测和修复 ======
+    print_message $BLUE "🔍 执行系统自动检测和修复..."
+    
+    # 自动修复1：检查并创建日志文件
+    if [ ! -f "$LOG_FILE" ]; then
+        print_message $YELLOW "⚠️ 日志文件不存在，正在自动创建..."
+        mkdir -p "$(dirname "$LOG_FILE")"
+        touch "$LOG_FILE"
+        print_message $GREEN "✅ 日志文件已创建"
+    fi
+    
+    # 自动修复2：检查并启动机器人
     local need_start=0
     if [ -f "$ENV_FILE" ]; then
         if [ ! -f "$PID_FILE" ]; then
@@ -3320,11 +3557,59 @@ main() {
             fi
         fi
         if [ $need_start -eq 1 ]; then
-            print_message $YELLOW "检测到机器人未在后台运行，正在自动启动..."
+            print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
             start_bot
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 机器人自动启动成功"
+            else
+                print_message $RED "❌ 机器人自动启动失败"
+            fi
+        else
+            print_message $GREEN "✅ 机器人进程正常运行"
         fi
     fi
-    # ====== 新增结束 ======
+    
+    # 自动修复3：检查并创建systemd服务（非Windows环境）
+    if [[ "$OSTYPE" != "msys" ]] && [[ "$OSTYPE" != "win32" ]] && [[ "$OS" != "Windows_NT" ]]; then
+        if command -v systemctl &> /dev/null; then
+            local service_status=$(check_systemd_service)
+            if [ "$service_status" = "disabled" ] || [ "$service_status" = "unsupported" ]; then
+                print_message $YELLOW "🔄 systemd服务未启用，正在自动创建..."
+                if create_systemd_service_silent; then
+                    print_message $GREEN "✅ systemd服务自动创建成功"
+                else
+                    print_message $YELLOW "⚠️ systemd服务创建失败（可能需要sudo权限）"
+                fi
+            else
+                print_message $GREEN "✅ systemd服务状态正常"
+            fi
+        fi
+    fi
+    
+    # 自动修复4：智能检查Python依赖
+    quick_check_dependencies
+    local auto_dep_status=$?
+    case $auto_dep_status in
+        0)
+            print_message $GREEN "✅ Python依赖检查通过"
+            ;;
+        1)
+            print_message $YELLOW "🔄 检测到大量缺失依赖，正在自动安装..."
+            install_dependencies
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 依赖自动安装完成"
+            else
+                print_message $RED "❌ 依赖自动安装失败"
+            fi
+            ;;
+        2)
+            print_message $BLUE "🔍 检测到少量缺失依赖，正在精确安装..."
+            install_missing_dependencies_only
+            ;;
+    esac
+    
+    print_message $GREEN "🎉 系统自动检测和修复完成"
+    # ====== 自动修复结束 ======
     print_message $GREEN "✅ 初始化完成！"
     print_message $CYAN "💡 提示：现在可以在任意目录使用 'fn-bot' 命令启动此脚本"
     print_message $YELLOW "⚠️ 注意：Ctrl+C 已被屏蔽，请使用菜单选项退出"
