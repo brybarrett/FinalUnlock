@@ -2408,6 +2408,357 @@ EOF
     print_message $CYAN "📋 监控日志: $PROJECT_DIR/monitor.log"
 }
 
+# 创建systemd服务
+create_systemd_service() {
+    print_message $BLUE "🔧 创建systemd服务..."
+    
+    # 检查是否为Linux环境
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OS" == "Windows_NT" ]]; then
+        print_message $YELLOW "⚠️ Windows环境不支持systemd服务"
+        return 1
+    fi
+    
+    # 检查systemd是否可用
+    if ! command -v systemctl &> /dev/null; then
+        print_message $YELLOW "⚠️ 系统不支持systemd"
+        return 1
+    fi
+    
+    local service_name="finalunlock-bot"
+    local service_file="/etc/systemd/system/${service_name}.service"
+    local script_path="$PROJECT_DIR/start.sh"
+    
+    print_message $CYAN "📝 创建服务文件: $service_file"
+    
+    # 创建systemd服务文件
+    sudo tee "$service_file" > /dev/null << EOF
+[Unit]
+Description=FinalUnlock Bot Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=$USER
+Group=$USER
+WorkingDirectory=$PROJECT_DIR
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:\$PATH
+ExecStart=$script_path --daemon
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=finalunlock-bot
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    if [ $? -eq 0 ]; then
+        print_message $GREEN "✅ 服务文件创建成功"
+        
+        # 重新加载systemd
+        sudo systemctl daemon-reload
+        
+        # 启用服务
+        if sudo systemctl enable "$service_name.service"; then
+            print_message $GREEN "✅ 服务已启用（开机自启）"
+            
+            # 询问是否立即启动服务
+            read -p "是否立即启动systemd服务? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                if sudo systemctl start "$service_name.service"; then
+                    print_message $GREEN "✅ 服务已启动"
+                    systemctl status "$service_name.service" --no-pager
+                else
+                    print_message $RED "❌ 服务启动失败"
+                fi
+            fi
+        else
+            print_message $RED "❌ 服务启用失败"
+            return 1
+        fi
+    else
+        print_message $RED "❌ 服务文件创建失败"
+        return 1
+    fi
+}
+
+# 检查systemd服务状态
+check_systemd_service() {
+    local service_name="finalunlock-bot"
+    
+    if command -v systemctl &> /dev/null; then
+        if systemctl is-enabled "$service_name.service" >/dev/null 2>&1; then
+            if systemctl is-active "$service_name.service" >/dev/null 2>&1; then
+                echo "running"
+            else
+                echo "stopped"
+            fi
+        else
+            echo "disabled"
+        fi
+    else
+        echo "unsupported"
+    fi
+}
+
+# 管理systemd服务
+manage_systemd_service() {
+    while true; do
+        print_message $BLUE "🔧 systemd服务管理"
+        
+        local service_status=$(check_systemd_service)
+        local status_text=""
+        case $service_status in
+            "running")
+                status_text="✅ 运行中并已启用开机自启"
+                ;;
+            "stopped")
+                status_text="⏸️ 已启用但未运行"
+                ;;
+            "disabled")
+                status_text="❌ 未启用开机自启"
+                ;;
+            "unsupported")
+                status_text="❌ 系统不支持systemd"
+                ;;
+        esac
+        
+        echo
+        print_message $CYAN "当前状态: $status_text"
+        echo
+        
+        print_message $CYAN "服务管理选项:"
+        echo -e "${CYAN}[1] 创建并启用服务${NC}"
+        echo -e "${CYAN}[2] 启动服务${NC}"
+        echo -e "${CYAN}[3] 停止服务${NC}"
+        echo -e "${CYAN}[4] 重启服务${NC}"
+        echo -e "${CYAN}[5] 查看服务状态${NC}"
+        echo -e "${CYAN}[6] 查看服务日志${NC}"
+        echo -e "${CYAN}[7] 禁用服务${NC}"
+        echo -e "${CYAN}[8] 删除服务${NC}"
+        echo -e "${CYAN}[0] 返回主菜单${NC}"
+        echo
+        
+        read -p "请选择 [0-8]: " service_choice
+        
+        case $service_choice in
+            1)
+                create_systemd_service
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            2)
+                print_message $BLUE "🔄 启动服务..."
+                if sudo systemctl start finalunlock-bot.service; then
+                    print_message $GREEN "✅ 服务已启动"
+                else
+                    print_message $RED "❌ 服务启动失败"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            3)
+                print_message $BLUE "🛑 停止服务..."
+                if sudo systemctl stop finalunlock-bot.service; then
+                    print_message $GREEN "✅ 服务已停止"
+                else
+                    print_message $RED "❌ 服务停止失败"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            4)
+                print_message $BLUE "🔄 重启服务..."
+                if sudo systemctl restart finalunlock-bot.service; then
+                    print_message $GREEN "✅ 服务已重启"
+                else
+                    print_message $RED "❌ 服务重启失败"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            5)
+                print_message $BLUE "📊 服务状态:"
+                systemctl status finalunlock-bot.service --no-pager
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            6)
+                print_message $BLUE "📋 服务日志 (最后50行):"
+                sudo journalctl -u finalunlock-bot.service -n 50 --no-pager
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            7)
+                print_message $BLUE "⏸️ 禁用服务..."
+                if sudo systemctl disable finalunlock-bot.service; then
+                    print_message $GREEN "✅ 服务已禁用"
+                else
+                    print_message $RED "❌ 服务禁用失败"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            8)
+                print_message $RED "⚠️ 确认删除systemd服务?"
+                read -p "此操作将删除服务文件 (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
+                    sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
+                    sudo rm -f /etc/systemd/system/finalunlock-bot.service
+                    sudo systemctl daemon-reload
+                    print_message $GREEN "✅ 服务已删除"
+                else
+                    print_message $YELLOW "❌ 取消删除操作"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+            0)
+                return
+                ;;
+            *)
+                print_message $RED "❌ 无效选择"
+                read -p "按任意键继续..." -n 1 -r
+                echo
+                ;;
+        esac
+    done
+}
+
+# 快速诊断和修复
+quick_diagnose_and_fix() {
+    print_message $BLUE "🔍 快速诊断系统状态..."
+    echo
+    
+    local issues_found=0
+    local fixes_applied=0
+    
+    # 检查机器人进程
+    print_message $CYAN "1. 检查机器人进程状态..."
+    local bot_status=$(check_bot_status)
+    if [ "$bot_status" != "running" ]; then
+        print_message $RED "❌ 机器人进程未运行"
+        issues_found=$((issues_found + 1))
+        
+        # 检查配置是否存在
+        if [ -f "$ENV_FILE" ]; then
+            print_message $YELLOW "🔄 尝试启动机器人..."
+            if start_bot; then
+                print_message $GREEN "✅ 机器人已启动"
+                fixes_applied=$((fixes_applied + 1))
+            else
+                print_message $RED "❌ 机器人启动失败"
+            fi
+        else
+            print_message $YELLOW "⚠️ 配置文件不存在，请先配置"
+        fi
+    else
+        print_message $GREEN "✅ 机器人进程正常运行"
+    fi
+    
+    # 检查日志文件
+    echo
+    print_message $CYAN "2. 检查日志文件..."
+    if [ ! -f "$LOG_FILE" ]; then
+        print_message $YELLOW "⚠️ Bot日志文件不存在"
+        issues_found=$((issues_found + 1))
+        
+        # 创建日志目录
+        mkdir -p "$(dirname "$LOG_FILE")"
+        touch "$LOG_FILE"
+        print_message $GREEN "✅ 已创建日志文件"
+        fixes_applied=$((fixes_applied + 1))
+    else
+        print_message $GREEN "✅ 日志文件存在"
+    fi
+    
+    # 检查systemd服务
+    echo
+    print_message $CYAN "3. 检查systemd服务状态..."
+    local service_status=$(check_systemd_service)
+    case $service_status in
+        "disabled"|"unsupported")
+            print_message $YELLOW "⚠️ systemd服务未启用"
+            issues_found=$((issues_found + 1))
+            
+            if [ "$service_status" != "unsupported" ]; then
+                print_message $BLUE "💡 建议启用systemd服务以实现开机自启"
+                read -p "是否现在创建systemd服务? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    if create_systemd_service; then
+                        fixes_applied=$((fixes_applied + 1))
+                    fi
+                fi
+            fi
+            ;;
+        "stopped")
+            print_message $YELLOW "⚠️ systemd服务已启用但未运行"
+            ;;
+        "running")
+            print_message $GREEN "✅ systemd服务正常运行"
+            ;;
+    esac
+    
+    # 检查依赖包
+    echo
+    print_message $CYAN "4. 检查Python依赖..."
+    if ! $PYTHON_CMD -c "import telegram, dotenv, Crypto, schedule, psutil" 2>/dev/null; then
+        print_message $YELLOW "⚠️ 发现缺失的依赖包"
+        issues_found=$((issues_found + 1))
+        
+        read -p "是否现在安装缺失的依赖? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if install_dependencies; then
+                print_message $GREEN "✅ 依赖安装完成"
+                fixes_applied=$((fixes_applied + 1))
+            fi
+        fi
+    else
+        print_message $GREEN "✅ 所有依赖包正常"
+    fi
+    
+    # 检查Guard进程
+    echo
+    print_message $CYAN "5. 检查Guard守护进程..."
+    if [ -f "$PROJECT_DIR/guard.pid" ]; then
+        local guard_pid=$(cat "$PROJECT_DIR/guard.pid" 2>/dev/null)
+        if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+            print_message $GREEN "✅ Guard进程正常运行"
+        else
+            print_message $YELLOW "⚠️ Guard PID文件存在但进程未运行"
+            rm -f "$PROJECT_DIR/guard.pid"
+        fi
+    else
+        print_message $YELLOW "💡 Guard进程未运行（这是正常的，可选功能）"
+    fi
+    
+    # 总结
+    echo
+    print_message $BLUE "📊 诊断总结:"
+    print_message $CYAN "🔍 发现问题: $issues_found 个"
+    print_message $CYAN "🔧 已修复: $fixes_applied 个"
+    
+    if [ $issues_found -eq 0 ]; then
+        print_message $GREEN "🎉 系统状态良好，未发现问题"
+    elif [ $fixes_applied -eq $issues_found ]; then
+        print_message $GREEN "🎉 所有问题已成功修复"
+    else
+        print_message $YELLOW "⚠️ 部分问题需要手动处理"
+    fi
+    
+    echo
+    read -p "按任意键返回主菜单..." -n 1 -r
+    echo
+}
+
 # 停止监控守护进程
 stop_monitor_daemon() {
     local monitor_pid_file="$PROJECT_DIR/monitor.pid"
@@ -2750,6 +3101,9 @@ show_menu() {
     echo -e "${CYAN}[8] 检查/修复虚拟环境${NC}"
     echo -e "${CYAN}[9] 完整卸载机器人${NC}"
     echo
+    echo -e "${BLUE}=== 🩺 诊断与修复 ===${NC}"
+    echo -e "${CYAN}[q] 快速诊断和修复${NC}"
+    echo
     echo -e "${BLUE}=== 🗑️ 卸载管理 ===${NC}"
     echo -e "${CYAN}[u] 仅卸载Python依赖${NC}"
     echo
@@ -2763,6 +3117,7 @@ show_menu() {
     echo -e "${CYAN}[r] 手动重启机器人${NC}"
     echo -e "${CYAN}[v] 验证配置${NC}"
     echo -e "${CYAN}[f] 修复配置${NC}"
+    echo -e "${CYAN}[d] systemd服务管理${NC}"
     echo
     echo -e "${CYAN}[0] 退出${NC}"
     echo
@@ -2841,6 +3196,25 @@ check_and_activate_venv() {
 
 # 主函数
 main() {
+    # 检查命令行参数
+    if [ "$1" = "--daemon" ]; then
+        # 守护进程模式，直接启动机器人
+        print_message $BLUE "🚀 守护进程模式启动..."
+        
+        # 检查并激活虚拟环境
+        check_and_activate_venv
+        
+        # 检查配置
+        if [ ! -f "$ENV_FILE" ]; then
+            print_message $RED "❌ 配置文件不存在，请先运行配置"
+            exit 1
+        fi
+        
+        # 启动机器人
+        start_bot
+        exit 0
+    fi
+    
     # 检查并激活虚拟环境
     check_and_activate_venv
     
@@ -2968,7 +3342,7 @@ main() {
     # 主菜单循环
     while true; do
         show_menu
-        read -p "请选择操作 [0-9ucgmsvrf]: " choice
+        read -p "请选择操作 [0-9qucgmsvrfd]: " choice
         
         case $choice in
             1)
@@ -3004,6 +3378,9 @@ main() {
                 ;;
             9)
                 uninstall_bot
+                ;;
+            q|Q)
+                quick_diagnose_and_fix
                 ;;
             u|U)
                 print_message $BLUE "🗑️ 卸载Python依赖包..."
@@ -3072,11 +3449,14 @@ main() {
                 print_message $BLUE "修复完成，建议重新验证配置"
                 read -p "按回车键继续..." -r
                 ;;
+            d|D)
+                manage_systemd_service
+                ;;
             0)
                 safe_exit
                 ;;
             *)
-                print_message $RED "❌ 无效选择，请输入 0-9、u、g、c、m、s、v、r 或 f"
+                print_message $RED "❌ 无效选择，请输入 0-9、q、u、g、c、m、s、v、r、f 或 d"
                 ;;
         esac
         

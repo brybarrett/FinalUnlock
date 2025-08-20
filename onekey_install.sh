@@ -751,10 +751,14 @@ show_management_menu() {
         print_message $CYAN "[b] 启动完整管理界面"
         print_message $CYAN "[c] 设置/重置开机自启"
         echo
+        print_message $BLUE "=== 🗑️ 卸载管理 ==="
+        print_message $CYAN "[d] 完整卸载机器人"
+        print_message $CYAN "[e] 仅卸载Python依赖"
+        echo
         print_message $CYAN "[0] 退出安装程序"
         echo
         
-        read -p "请选择操作 [0-9,a-c]: " choice
+        read -p "请选择操作 [0-9,a-e]: " choice
         
         case $choice in
             1)
@@ -916,6 +920,81 @@ show_management_menu() {
                 ;;
             c)
                 setup_autostart
+                ;;
+            d)
+                print_message $RED "⚠️ 完整卸载FinalUnlock机器人"
+                print_message $RED "⚠️ 这将删除所有文件和依赖，操作不可逆！"
+                echo
+                read -p "请输入 'UNINSTALL' 确认完整卸载: " confirm
+                if [ "$confirm" = "UNINSTALL" ]; then
+                    if [ -n "$project_dir" ]; then
+                        cd "$project_dir"
+                        if [ -f "start.sh" ]; then
+                            print_message $BLUE "🔄 执行完整卸载..."
+                            bash start.sh --uninstall-complete 2>/dev/null || {
+                                # 如果start.sh不支持--uninstall-complete，则手动卸载
+                                print_message $YELLOW "🔄 使用备用卸载方法..."
+                                
+                                # 停止所有进程
+                                pkill -f "bot.py" 2>/dev/null || true
+                                pkill -f "guard.py" 2>/dev/null || true
+                                
+                                # 卸载依赖
+                                if [ -f "requirements.txt" ]; then
+                                    print_message $YELLOW "🔄 卸载Python依赖..."
+                                    pip uninstall -y -r requirements.txt 2>/dev/null || true
+                                fi
+                                
+                                # 删除服务
+                                sudo systemctl stop finalunlock-bot.service 2>/dev/null || true
+                                sudo systemctl disable finalunlock-bot.service 2>/dev/null || true
+                                sudo rm -f /etc/systemd/system/finalunlock-bot.service 2>/dev/null || true
+                                sudo systemctl daemon-reload 2>/dev/null || true
+                                
+                                # 删除全局命令
+                                sudo rm -f /usr/local/bin/fn-bot 2>/dev/null || true
+                                rm -f "$HOME/.local/bin/fn-bot" 2>/dev/null || true
+                                
+                                # 删除项目目录
+                                cd ..
+                                rm -rf "$project_dir"
+                                
+                                print_message $GREEN "✅ 卸载完成"
+                            }
+                        else
+                            print_message $RED "❌ 未找到start.sh文件"
+                        fi
+                    else
+                        print_message $RED "❌ 未找到项目目录"
+                    fi
+                    print_message $GREEN "👋 FinalUnlock已完全卸载"
+                    exit 0
+                else
+                    print_message $YELLOW "❌ 取消卸载操作"
+                fi
+                ;;
+            e)
+                print_message $YELLOW "🔄 卸载Python依赖..."
+                if [ -n "$project_dir" ] && [ -f "$project_dir/requirements.txt" ]; then
+                    cd "$project_dir"
+                    read -p "确认卸载所有Python依赖包? (y/N): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        print_message $BLUE "🔄 正在卸载依赖..."
+                        while read -r line; do
+                            if [ -n "$line" ] && [[ ! "$line" =~ ^# ]]; then
+                                package_name=$(echo "$line" | sed 's/[>=<].*//' | sed 's/==.*//')
+                                print_message $CYAN "🔄 卸载 $package_name..."
+                                pip uninstall -y "$package_name" 2>/dev/null || true
+                            fi
+                        done < requirements.txt
+                        print_message $GREEN "✅ 依赖卸载完成"
+                    else
+                        print_message $YELLOW "❌ 取消卸载依赖"
+                    fi
+                else
+                    print_message $RED "❌ 未找到requirements.txt文件"
+                fi
                 ;;
             0)
                 print_message $GREEN "👋 感谢使用FinalUnlock！"
