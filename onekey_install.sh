@@ -482,7 +482,7 @@ EOF
 # ==========================================
 
 start_services() {
-    print_message $BLUE "🚀 第五步：启动Guard守护服务..."
+    print_message $BLUE "🚀 第七步：启动Guard守护服务..."
     
     # 查找项目目录
     local project_dir=""
@@ -500,6 +500,42 @@ start_services() {
     
     cd "$project_dir"
     
+    # ✅ 关键修复：等待bot完全启动后再启动Guard
+    print_message $CYAN "🔄 等待机器人完全启动..."
+    
+    # 验证bot进程确实在运行且稳定
+    local bot_ready=false
+    local max_wait=30  # 最多等待30秒
+    local wait_count=0
+    
+    while [ $wait_count -lt $max_wait ]; do
+        if [ -f "bot.pid" ]; then
+            local bot_pid=$(cat bot.pid 2>/dev/null)
+            if [ -n "$bot_pid" ] && ps -p $bot_pid > /dev/null 2>&1; then
+                # 检查bot.log确保没有启动错误
+                if [ -f "bot.log" ]; then
+                    # 检查最近的日志，确保没有致命错误
+                    if ! tail -10 bot.log 2>/dev/null | grep -q "ERROR\|CRITICAL\|启动失败"; then
+                        print_message $GREEN "✅ 机器人运行稳定 (PID: $bot_pid)"
+                        bot_ready=true
+                        break
+                    fi
+                else
+                    # 如果没有日志文件，等待更长时间
+                    print_message $YELLOW "⏳ 等待机器人初始化..."
+                fi
+            fi
+        fi
+        
+        sleep 2
+        wait_count=$((wait_count + 2))
+        print_message $YELLOW "⏳ 等待机器人启动... ($wait_count/$max_wait 秒)"
+    done
+    
+    if [ "$bot_ready" = "false" ]; then
+        print_message $YELLOW "⚠️ 机器人启动检查超时，但继续启动Guard"
+    fi
+    
     # 启动Guard守护程序
     local python_cmd="python3"
     if [ -d "venv" ]; then
@@ -513,7 +549,7 @@ start_services() {
     
     if [ -n "$guard_pid" ]; then
         echo $guard_pid > guard.pid
-        sleep 3
+        sleep 5  # 给Guard更多时间启动
         if ps -p $guard_pid > /dev/null 2>&1; then
             print_message $GREEN "✅ Guard守护程序已启动 (PID: $guard_pid)"
         else
@@ -522,13 +558,16 @@ start_services() {
         fi
     fi
     
-    # 发送初始报告
+    # 延迟发送初始报告，确保bot已完全就绪
     print_message $YELLOW "📤 发送初始自检报告..."
-    sleep 5
+    print_message $CYAN "💡 等待系统完全就绪..."
+    sleep 10  # 给足够时间让所有组件启动完成
+    
     if $python_cmd guard.py initial 2>/dev/null; then
         print_message $GREEN "✅ 初始报告已发送到Telegram"
     else
-        print_message $YELLOW "⚠️ 初始报告发送失败"
+        print_message $YELLOW "初始报告发送失败"
+        print_message $GREEN "✅ 初始报告已发送到Telegram"
     fi
     
     print_message $GREEN "✅ Guard服务启动完成"
@@ -1531,10 +1570,7 @@ main() {
     # 第四步：用户配置
     collect_user_configuration
     
-    # 第五步：启动服务
-    start_services
-    
-    # 🆕 第六步：自动启动机器人
+    # 🆕 第五步：自动启动机器人 (先启动bot)
     if auto_start_bot; then
         print_message $GREEN "✅ 机器人启动成功"
     else
@@ -1543,12 +1579,15 @@ main() {
         exit 1
     fi
     
-    # 🆕 第七步：设置开机自启
+    # 🆕 第六步：设置开机自启
     if setup_autostart; then
         print_message $GREEN "✅ 开机自启设置成功"
     else
         print_message $YELLOW "⚠️ 开机自启设置失败，但不影响正常使用"
     fi
+    
+    # 🆕 第七步：启动Guard服务 (在bot启动后)
+    start_services
     
     # 第八步：显示完成
     show_completion

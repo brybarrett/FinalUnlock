@@ -84,10 +84,36 @@ CHAT_ID = os.getenv('CHAT_ID')
 # 验证配置
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN 未配置，请检查 .env 文件")
+    logger.error("当前工作目录: " + os.getcwd())
+    logger.error("环境文件路径: " + os.path.join(os.getcwd(), '.env'))
+    if os.path.exists('.env'):
+        logger.error(".env 文件存在，但BOT_TOKEN为空")
+        with open('.env', 'r') as f:
+            content = f.read()
+            logger.error(f".env 内容长度: {len(content)} 字符")
+            if 'BOT_TOKEN' in content:
+                logger.error("BOT_TOKEN 行存在但值为空")
+            else:
+                logger.error("BOT_TOKEN 行不存在")
+    else:
+        logger.error(".env 文件不存在")
     sys.exit(1)
 
 if not CHAT_ID:
     logger.error("CHAT_ID 未配置，请检查 .env 文件")
+    logger.error("当前工作目录: " + os.getcwd())
+    logger.error("环境文件路径: " + os.path.join(os.getcwd(), '.env'))
+    if os.path.exists('.env'):
+        logger.error(".env 文件存在，但CHAT_ID为空")
+        with open('.env', 'r') as f:
+            content = f.read()
+            logger.error(f".env 内容长度: {len(content)} 字符")
+            if 'CHAT_ID' in content:
+                logger.error("CHAT_ID 行存在但值为空")
+            else:
+                logger.error("CHAT_ID 行不存在")
+    else:
+        logger.error(".env 文件不存在")
     sys.exit(1)
 
 def today_str():
