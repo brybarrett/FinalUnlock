@@ -354,6 +354,11 @@ else
     fi
 fi
 
+# 在项目下载完成后，添加虚拟环境创建流程
+
+print_message $GREEN "✅ 项目下载完成！"
+echo
+
 # 检查Python和虚拟环境支持
 check_python_and_venv() {
     print_message $BLUE "🐍 检查Python环境和虚拟环境支持..."
@@ -372,11 +377,6 @@ check_python_and_venv() {
             sudo dnf install -y python3 python3-venv python3-pip
         else
             print_message $RED "❌ 无法自动安装Python3，请手动安装"
-            exit 1
-        fi
-        
-        if ! command -v python3 &> /dev/null; then
-            print_message $RED "❌ Python3安装失败"
             exit 1
         fi
         PYTHON_CMD="python3"
@@ -423,18 +423,10 @@ create_virtual_environment() {
     
     local venv_dir="$INSTALL_DIR/venv"
     
-    # 如果虚拟环境已存在，询问是否重新创建
+    # 如果虚拟环境已存在，删除重建
     if [ -d "$venv_dir" ]; then
-        print_message $YELLOW "⚠️ 虚拟环境已存在，是否重新创建？"
-        read -p "重新创建虚拟环境? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_message $YELLOW "🔄 删除现有虚拟环境..."
-            rm -rf "$venv_dir"
-        else
-            print_message $GREEN "✅ 使用现有虚拟环境"
-            return 0
-        fi
+        print_message $YELLOW "🔄 删除现有虚拟环境..."
+        rm -rf "$venv_dir"
     fi
     
     # 创建虚拟环境
@@ -447,7 +439,6 @@ create_virtual_environment() {
     fi
     
     print_message $GREEN "✅ 虚拟环境创建成功"
-    return 0
 }
 
 # 激活虚拟环境并安装依赖
@@ -504,77 +495,15 @@ install_dependencies_in_venv() {
     
     # 验证依赖
     print_message $YELLOW "🔄 验证依赖安装..."
-    local missing_deps=()
-    
-    if ! python -c "import telegram" 2>/dev/null; then
-        missing_deps+=("python-telegram-bot")
-    fi
-    
-    if ! python -c "import dotenv" 2>/dev/null; then
-        missing_deps+=("python-dotenv")
-    fi
-    
-    if ! python -c "import Crypto" 2>/dev/null; then
-        missing_deps+=("pycryptodome")
-    fi
-    
-    if ! python -c "import schedule" 2>/dev/null; then
-        missing_deps+=("schedule")
-    fi
-    
-    if ! python -c "import psutil" 2>/dev/null; then
-        missing_deps+=("psutil")
-    fi
-    
-    if [ ${#missing_deps[@]} -eq 0 ]; then
+    if python -c "import telegram, dotenv, Crypto, schedule, psutil" 2>/dev/null; then
         print_message $GREEN "✅ 所有依赖验证通过"
     else
-        print_message $RED "❌ 以下依赖验证失败: ${missing_deps[*]}"
+        print_message $RED "❌ 依赖验证失败"
         exit 1
     fi
-    
-    # 更新Python命令路径
-    PYTHON_CMD="$venv_dir/bin/python"
-    PIP_CMD="$venv_dir/bin/pip"
-    
-    print_message $CYAN "💡 虚拟环境路径: $venv_dir"
-    print_message $CYAN "💡 Python路径: $PYTHON_CMD"
-    print_message $CYAN "💡 激活命令: source $venv_dir/bin/activate"
 }
 
-# 创建虚拟环境激活脚本
-create_activation_script() {
-    print_message $BLUE "📝 创建虚拟环境激活脚本..."
-    
-    local activate_script="$INSTALL_DIR/activate_venv.sh"
-    
-    cat > "$activate_script" << EOF
-#!/bin/bash
-# FinalUnlock 虚拟环境激活脚本
-
-PROJECT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="\$PROJECT_DIR/venv"
-
-if [ -d "\$VENV_DIR" ]; then
-    echo "🐍 激活FinalUnlock虚拟环境..."
-    source "\$VENV_DIR/bin/activate"
-    echo "✅ 虚拟环境已激活: \$VIRTUAL_ENV"
-    echo "💡 使用 'deactivate' 命令退出虚拟环境"
-else
-    echo "❌ 虚拟环境不存在: \$VENV_DIR"
-    echo "请重新运行安装脚本"
-    exit 1
-fi
-EOF
-    
-    chmod +x "$activate_script"
-    print_message $GREEN "✅ 激活脚本创建完成: $activate_script"
-}
-
-# 修改主安装流程
-print_message $GREEN "✅ 项目下载完成！"
-echo
-
+# 在主安装流程中调用这些函数
 # 1. 检查Python和虚拟环境支持
 check_python_and_venv
 
@@ -584,10 +513,7 @@ create_virtual_environment
 # 3. 在虚拟环境中安装依赖
 install_dependencies_in_venv
 
-# 4. 创建激活脚本
-create_activation_script
-
-# 5. 创建全局命令（修改为使用虚拟环境）
+# 4. 修改全局命令创建（使用虚拟环境）
 if [ "$INSTALL_MODE" = "global" ]; then
     print_message $BLUE "🔧 创建全局命令..."
     
@@ -617,4 +543,3 @@ EOF
     print_message $GREEN "✅ 本地命令创建成功: fn-bot (使用虚拟环境)"
 fi
 
-# ... 继续原有的配置流程 ...

@@ -2540,8 +2540,32 @@ check_and_activate_venv() {
         fi
     else
         print_message $RED "❌ 虚拟环境不存在: $venv_dir"
-        print_message $YELLOW "请重新运行安装脚本或手动创建虚拟环境"
-        exit 1
+        print_message $YELLOW "正在尝试创建虚拟环境..."
+        
+        # 尝试创建虚拟环境
+        if command -v python3 &> /dev/null; then
+            python3 -m venv "$venv_dir"
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 虚拟环境创建成功"
+                source "$venv_dir/bin/activate"
+                
+                # 安装依赖
+                print_message $YELLOW "📥 安装依赖..."
+                pip install --upgrade pip
+                pip install -r requirements.txt
+                pip install schedule psutil
+                
+                PYTHON_CMD="$venv_dir/bin/python"
+                PIP_CMD="$venv_dir/bin/pip"
+            else
+                print_message $RED "❌ 虚拟环境创建失败"
+                print_message $YELLOW "请重新运行安装脚本"
+                exit 1
+            fi
+        else
+            print_message $RED "❌ 未找到python3，请重新运行安装脚本"
+            exit 1
+        fi
     fi
 }
 
