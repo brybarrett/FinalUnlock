@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# FinalShell 激活码机器人一键安装命令 v3.0
-# 真正的一键安装 - 零手动干预
+# FinalShell 激活码机器人一键安装命令 v3.1
+# 项目地址: https://github.com/xymn2023/FinalUnlock
 
 # 颜色定义
 RED='\033[0;31m'
@@ -23,7 +23,7 @@ print_message() {
 clear
 echo -e "${PURPLE}================================${NC}"
 echo -e "${PURPLE}  FinalShell 激活码机器人一键安装${NC}"
-echo -e "${PURPLE}     真正的零干预安装 v3.0${NC}"
+echo -e "${PURPLE}     版本 v3.1${NC}"
 echo -e "${PURPLE}================================${NC}"
 echo -e "${CYAN}项目地址: https://github.com/xymn2023/FinalUnlock${NC}"
 echo -e "${CYAN}智能处理所有环境问题${NC}"
@@ -139,7 +139,7 @@ execute_installation() {
     rm -rf "$TEMP_DIR"
 }
 
-# 智能Guard安装
+# 智能Guard安装（修复语法错误）
 intelligent_guard_installation() {
     print_message $CYAN "🛡️ 智能Guard守护程序安装..."
     
@@ -218,12 +218,15 @@ intelligent_guard_installation() {
         if $python_cmd -c "import schedule, psutil" 2>/dev/null; then
             print_message $GREEN "✅ Guard依赖安装成功"
             
-            # 启动Guard
+            # 启动Guard（修复语法错误）
             print_message $BLUE "🛡️ 启动Guard守护程序..."
             chmod +x guard.sh 2>/dev/null || true
             
-            if nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &; then
-                local guard_pid=$!
+            # 正确的nohup语法 - 修复第225行错误
+            nohup $python_cmd guard.py daemon > guard_$(date +%Y%m%d).log 2>&1 &
+            local guard_pid=$!
+            
+            if [ -n "$guard_pid" ]; then
                 echo $guard_pid > guard.pid
                 sleep 3
                 
