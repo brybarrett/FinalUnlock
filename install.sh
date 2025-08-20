@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# FinalShell 激活码机器人一键安装脚本
-# 自动适配全局/本地环境
+# FinalShell 激活码机器人一键安装脚本 v3.0
+# 强制虚拟环境安装
 # 项目地址: https://github.com/xymn2023/FinalUnlock
 
 # 颜色定义
@@ -352,4 +352,269 @@ else
     else
         print_message $YELLOW "cd $INSTALL_DIR && ./start.sh"
     fi
-fi 
+fi
+
+# 检查Python和虚拟环境支持
+check_python_and_venv() {
+    print_message $BLUE "🐍 检查Python环境和虚拟环境支持..."
+    
+    # 检查Python3
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+        print_message $GREEN "✅ 找到 python3"
+    else
+        print_message $RED "❌ 未找到python3，正在安装..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y python3 python3-venv python3-pip
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y python3 python3-venv python3-pip
+        else
+            print_message $RED "❌ 无法自动安装Python3，请手动安装"
+            exit 1
+        fi
+        
+        if ! command -v python3 &> /dev/null; then
+            print_message $RED "❌ Python3安装失败"
+            exit 1
+        fi
+        PYTHON_CMD="python3"
+    fi
+    
+    # 检查Python版本
+    local version=$($PYTHON_CMD --version 2>&1 | cut -d' ' -f2)
+    local major=$(echo $version | cut -d'.' -f1)
+    local minor=$(echo $version | cut -d'.' -f2)
+    
+    if [ "$major" -lt 3 ] || ([ "$major" -eq 3 ] && [ "$minor" -lt 7 ]); then
+        print_message $RED "❌ Python版本过低，需要Python 3.7+，当前版本: $version"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ Python版本检查通过: $version"
+    
+    # 检查虚拟环境支持
+    if ! $PYTHON_CMD -c "import venv" 2>/dev/null; then
+        print_message $RED "❌ Python不支持虚拟环境，正在安装python3-venv..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get install -y python3-venv
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y python3-venv
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y python3-venv
+        else
+            print_message $RED "❌ 无法安装python3-venv，请手动安装"
+            exit 1
+        fi
+        
+        if ! $PYTHON_CMD -c "import venv" 2>/dev/null; then
+            print_message $RED "❌ 虚拟环境支持安装失败"
+            exit 1
+        fi
+    fi
+    
+    print_message $GREEN "✅ 虚拟环境支持检查通过"
+}
+
+# 强制创建虚拟环境
+create_virtual_environment() {
+    print_message $BLUE "🐍 创建项目虚拟环境..."
+    
+    local venv_dir="$INSTALL_DIR/venv"
+    
+    # 如果虚拟环境已存在，询问是否重新创建
+    if [ -d "$venv_dir" ]; then
+        print_message $YELLOW "⚠️ 虚拟环境已存在，是否重新创建？"
+        read -p "重新创建虚拟环境? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_message $YELLOW "🔄 删除现有虚拟环境..."
+            rm -rf "$venv_dir"
+        else
+            print_message $GREEN "✅ 使用现有虚拟环境"
+            return 0
+        fi
+    fi
+    
+    # 创建虚拟环境
+    print_message $YELLOW "🔄 创建虚拟环境: $venv_dir"
+    $PYTHON_CMD -m venv "$venv_dir"
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 虚拟环境创建失败"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ 虚拟环境创建成功"
+    return 0
+}
+
+# 激活虚拟环境并安装依赖
+install_dependencies_in_venv() {
+    print_message $BLUE "📦 在虚拟环境中安装依赖..."
+    
+    local venv_dir="$INSTALL_DIR/venv"
+    
+    # 激活虚拟环境
+    print_message $YELLOW "🔄 激活虚拟环境..."
+    source "$venv_dir/bin/activate"
+    
+    if [ -z "$VIRTUAL_ENV" ]; then
+        print_message $RED "❌ 虚拟环境激活失败"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ 虚拟环境已激活: $VIRTUAL_ENV"
+    
+    # 更新pip
+    print_message $YELLOW "🔄 升级pip..."
+    pip install --upgrade pip
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ pip升级失败"
+        exit 1
+    fi
+    
+    # 检查requirements.txt
+    if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
+        print_message $RED "❌ requirements.txt 文件不存在"
+        exit 1
+    fi
+    
+    # 安装项目依赖
+    print_message $YELLOW "📥 安装项目依赖..."
+    pip install -r "$INSTALL_DIR/requirements.txt"
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ 依赖安装失败"
+        exit 1
+    fi
+    
+    # 安装Guard依赖
+    print_message $YELLOW "📥 安装Guard守护程序依赖..."
+    pip install schedule psutil
+    
+    if [ $? -ne 0 ]; then
+        print_message $RED "❌ Guard依赖安装失败"
+        exit 1
+    fi
+    
+    print_message $GREEN "✅ 所有依赖安装完成"
+    
+    # 验证依赖
+    print_message $YELLOW "🔄 验证依赖安装..."
+    local missing_deps=()
+    
+    if ! python -c "import telegram" 2>/dev/null; then
+        missing_deps+=("python-telegram-bot")
+    fi
+    
+    if ! python -c "import dotenv" 2>/dev/null; then
+        missing_deps+=("python-dotenv")
+    fi
+    
+    if ! python -c "import Crypto" 2>/dev/null; then
+        missing_deps+=("pycryptodome")
+    fi
+    
+    if ! python -c "import schedule" 2>/dev/null; then
+        missing_deps+=("schedule")
+    fi
+    
+    if ! python -c "import psutil" 2>/dev/null; then
+        missing_deps+=("psutil")
+    fi
+    
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有依赖验证通过"
+    else
+        print_message $RED "❌ 以下依赖验证失败: ${missing_deps[*]}"
+        exit 1
+    fi
+    
+    # 更新Python命令路径
+    PYTHON_CMD="$venv_dir/bin/python"
+    PIP_CMD="$venv_dir/bin/pip"
+    
+    print_message $CYAN "💡 虚拟环境路径: $venv_dir"
+    print_message $CYAN "💡 Python路径: $PYTHON_CMD"
+    print_message $CYAN "💡 激活命令: source $venv_dir/bin/activate"
+}
+
+# 创建虚拟环境激活脚本
+create_activation_script() {
+    print_message $BLUE "📝 创建虚拟环境激活脚本..."
+    
+    local activate_script="$INSTALL_DIR/activate_venv.sh"
+    
+    cat > "$activate_script" << EOF
+#!/bin/bash
+# FinalUnlock 虚拟环境激活脚本
+
+PROJECT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="\$PROJECT_DIR/venv"
+
+if [ -d "\$VENV_DIR" ]; then
+    echo "🐍 激活FinalUnlock虚拟环境..."
+    source "\$VENV_DIR/bin/activate"
+    echo "✅ 虚拟环境已激活: \$VIRTUAL_ENV"
+    echo "💡 使用 'deactivate' 命令退出虚拟环境"
+else
+    echo "❌ 虚拟环境不存在: \$VENV_DIR"
+    echo "请重新运行安装脚本"
+    exit 1
+fi
+EOF
+    
+    chmod +x "$activate_script"
+    print_message $GREEN "✅ 激活脚本创建完成: $activate_script"
+}
+
+# 修改主安装流程
+print_message $GREEN "✅ 项目下载完成！"
+echo
+
+# 1. 检查Python和虚拟环境支持
+check_python_and_venv
+
+# 2. 强制创建虚拟环境
+create_virtual_environment
+
+# 3. 在虚拟环境中安装依赖
+install_dependencies_in_venv
+
+# 4. 创建激活脚本
+create_activation_script
+
+# 5. 创建全局命令（修改为使用虚拟环境）
+if [ "$INSTALL_MODE" = "global" ]; then
+    print_message $BLUE "🔧 创建全局命令..."
+    
+    sudo tee /usr/local/bin/fn-bot > /dev/null << EOF
+#!/bin/bash
+# 激活虚拟环境并运行
+source "$INSTALL_DIR/venv/bin/activate"
+"$INSTALL_DIR/start.sh" "\$@"
+EOF
+    sudo chmod +x /usr/local/bin/fn-bot
+    
+    print_message $GREEN "✅ 全局命令创建成功: fn-bot (使用虚拟环境)"
+else
+    print_message $BLUE "🔧 创建本地命令..."
+    
+    local_bin="$HOME/.local/bin"
+    mkdir -p "$local_bin"
+    
+    tee "$local_bin/fn-bot" > /dev/null << EOF
+#!/bin/bash
+# 激活虚拟环境并运行
+source "$INSTALL_DIR/venv/bin/activate"
+"$INSTALL_DIR/start.sh" "\$@"
+EOF
+    chmod +x "$local_bin/fn-bot"
+    
+    print_message $GREEN "✅ 本地命令创建成功: fn-bot (使用虚拟环境)"
+fi
+
+# ... 继续原有的配置流程 ...

@@ -1284,6 +1284,309 @@ check_updates() {
     fi
 }
 
+# 验证Bot Token格式
+validate_bot_token() {
+    local token="$1"
+    
+    # 检查是否为空
+    if [ -z "$token" ]; then
+        echo "empty"
+        return 1
+    fi
+    
+    # 检查基本格式：数字:字母数字字符
+    if [[ ! "$token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        echo "invalid_format"
+        return 1
+    fi
+    
+    # 检查长度（Telegram Bot Token通常很长）
+    if [ ${#token} -lt 35 ]; then
+        echo "too_short"
+        return 1
+    fi
+    
+    echo "valid"
+    return 0
+}
+
+# 验证Chat ID格式
+validate_chat_id() {
+    local chat_id="$1"
+    
+    # 检查是否为空
+    if [ -z "$chat_id" ]; then
+        echo "empty"
+        return 1
+    fi
+    
+    # 检查格式：单个数字或逗号分隔的数字
+    if [[ ! "$chat_id" =~ ^[0-9]+([,][0-9]+)*$ ]]; then
+        echo "invalid_format"
+        return 1
+    fi
+    
+    # 检查每个ID的长度
+    IFS=',' read -ra IDS <<< "$chat_id"
+    for id in "${IDS[@]}"; do
+        if [ ${#id} -lt 5 ] || [ ${#id} -gt 15 ]; then
+            echo "invalid_length"
+            return 1
+        fi
+    done
+    
+    echo "valid"
+    return 0
+}
+
+# 测试Bot Token有效性
+test_bot_token() {
+    local token="$1"
+    
+    if [ -z "$token" ]; then
+        return 1
+    fi
+    
+    # 使用curl测试Token
+    if command -v curl &> /dev/null; then
+        local response=$(curl -s "https://api.telegram.org/bot$token/getMe" 2>/dev/null)
+        if echo "$response" | grep -q '"ok":true'; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# 完整的配置验证函数
+validate_configuration() {
+    local config_valid=true
+    local validation_log="$PROJECT_DIR/config_validation.log"
+    
+    print_message $BLUE "🔍 验证配置文件..."
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): Starting configuration validation" > "$validation_log"
+    
+    # 检查.env文件是否存在
+    if [ ! -f "$ENV_FILE" ]; then
+        print_message $RED "❌ .env 文件不存在"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): .env file not found" >> "$validation_log"
+        return 1
+    fi
+    
+    # 读取配置
+    source "$ENV_FILE"
+    
+    # 验证Bot Token
+    print_message $YELLOW "🔑 验证 Bot Token..."
+    local token_validation=$(validate_bot_token "$BOT_TOKEN")
+    case $token_validation in
+        "empty")
+            print_message $RED "❌ Bot Token 为空"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Bot Token is empty" >> "$validation_log"
+            config_valid=false
+            ;;
+        "invalid_format")
+            print_message $RED "❌ Bot Token 格式无效"
+            print_message $YELLOW "💡 正确格式: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Bot Token format invalid" >> "$validation_log"
+            config_valid=false
+            ;;
+        "too_short")
+            print_message $RED "❌ Bot Token 长度过短"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Bot Token too short" >> "$validation_log"
+            config_valid=false
+            ;;
+        "valid")
+            print_message $GREEN "✅ Bot Token 格式正确"
+            
+            # 测试Token有效性
+            print_message $YELLOW "🌐 测试 Bot Token 连接..."
+            if test_bot_token "$BOT_TOKEN"; then
+                print_message $GREEN "✅ Bot Token 连接测试成功"
+                echo "$(date '+%Y-%m-%d %H:%M:%S'): Bot Token connection test passed" >> "$validation_log"
+            else
+                print_message $YELLOW "⚠️ Bot Token 连接测试失败（可能是网络问题）"
+                echo "$(date '+%Y-%m-%d %H:%M:%S'): Bot Token connection test failed" >> "$validation_log"
+            fi
+            ;;
+    esac
+    
+    # 验证Chat ID
+    print_message $YELLOW "👤 验证 Chat ID..."
+    local chat_id_validation=$(validate_chat_id "$CHAT_ID")
+    case $chat_id_validation in
+        "empty")
+            print_message $RED "❌ Chat ID 为空"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Chat ID is empty" >> "$validation_log"
+            config_valid=false
+            ;;
+        "invalid_format")
+            print_message $RED "❌ Chat ID 格式无效"
+            print_message $YELLOW "💡 正确格式: 123456789 或 123456789,987654321"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Chat ID format invalid" >> "$validation_log"
+            config_valid=false
+            ;;
+        "invalid_length")
+            print_message $RED "❌ Chat ID 长度无效"
+            print_message $YELLOW "💡 Chat ID 应该是5-15位数字"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Chat ID length invalid" >> "$validation_log"
+            config_valid=false
+            ;;
+        "valid")
+            print_message $GREEN "✅ Chat ID 格式正确"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Chat ID format valid" >> "$validation_log"
+            
+            # 显示管理员数量
+            IFS=',' read -ra IDS <<< "$CHAT_ID"
+            local admin_count=${#IDS[@]}
+            print_message $CYAN "👥 配置了 $admin_count 个管理员"
+            ;;
+    esac
+    
+    # 检查Python环境
+    print_message $YELLOW "🐍 验证 Python 环境..."
+    if command -v python3 &> /dev/null; then
+        local python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
+        print_message $GREEN "✅ Python 版本: $python_version"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Python version: $python_version" >> "$validation_log"
+    else
+        print_message $RED "❌ Python3 未安装"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Python3 not found" >> "$validation_log"
+        config_valid=false
+    fi
+    
+    # 检查依赖包
+    print_message $YELLOW "📦 验证依赖包..."
+    local missing_deps=()
+    
+    if ! python3 -c "import telegram" 2>/dev/null; then
+        missing_deps+=("python-telegram-bot")
+    fi
+    
+    if ! python3 -c "import dotenv" 2>/dev/null; then
+        missing_deps+=("python-dotenv")
+    fi
+    
+    if ! python3 -c "import Crypto" 2>/dev/null; then
+        missing_deps+=("pycryptodome")
+    fi
+    
+    if [ ${#missing_deps[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有依赖包已安装"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): All dependencies installed" >> "$validation_log"
+    else
+        print_message $RED "❌ 缺少依赖包: ${missing_deps[*]}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Missing dependencies: ${missing_deps[*]}" >> "$validation_log"
+        config_valid=false
+    fi
+    
+    # 检查核心文件
+    print_message $YELLOW "📁 验证核心文件..."
+    local missing_files=()
+    
+    if [ ! -f "$PROJECT_DIR/bot.py" ]; then
+        missing_files+=("bot.py")
+    fi
+    
+    if [ ! -f "$PROJECT_DIR/py.py" ]; then
+        missing_files+=("py.py")
+    fi
+    
+    if [ ! -f "$PROJECT_DIR/requirements.txt" ]; then
+        missing_files+=("requirements.txt")
+    fi
+    
+    if [ ${#missing_files[@]} -eq 0 ]; then
+        print_message $GREEN "✅ 所有核心文件存在"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): All core files present" >> "$validation_log"
+    else
+        print_message $RED "❌ 缺少核心文件: ${missing_files[*]}"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Missing core files: ${missing_files[*]}" >> "$validation_log"
+        config_valid=false
+    fi
+    
+    # 检查权限
+    print_message $YELLOW "🔐 验证文件权限..."
+    if [ -r "$PROJECT_DIR/bot.py" ] && [ -r "$PROJECT_DIR/py.py" ]; then
+        print_message $GREEN "✅ 文件权限正常"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): File permissions OK" >> "$validation_log"
+    else
+        print_message $RED "❌ 文件权限不足"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Insufficient file permissions" >> "$validation_log"
+        config_valid=false
+    fi
+    
+    # 最终结果
+    echo
+    if [ "$config_valid" = true ]; then
+        print_message $GREEN "🎉 配置验证通过！"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Configuration validation passed" >> "$validation_log"
+        return 0
+    else
+        print_message $RED "❌ 配置验证失败，请修复上述问题"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Configuration validation failed" >> "$validation_log"
+        return 1
+    fi
+}
+
+# 配置修复建议
+show_config_fix_suggestions() {
+    print_message $BLUE "🔧 配置修复建议:"
+    echo
+    
+    print_message $YELLOW "1. Bot Token 问题:"
+    print_message $CYAN "   • 访问 @BotFather 创建新机器人"
+    print_message $CYAN "   • 发送 /newbot 命令"
+    print_message $CYAN "   • 按提示设置机器人名称"
+    print_message $CYAN "   • 复制获得的 Token"
+    echo
+    
+    print_message $YELLOW "2. Chat ID 问题:"
+    print_message $CYAN "   • 访问 @userinfobot"
+    print_message $CYAN "   • 发送任意消息获取您的 Chat ID"
+    print_message $CYAN "   • 多个管理员用逗号分隔"
+    echo
+    
+    print_message $YELLOW "3. 依赖包问题:"
+    print_message $CYAN "   • 运行: pip install -r requirements.txt"
+    print_message $CYAN "   • 或使用菜单选项 [6] 检查依赖"
+    echo
+    
+    print_message $YELLOW "4. 文件权限问题:"
+    print_message $CYAN "   • 运行: chmod +x start.sh"
+    print_message $CYAN "   • 确保有读取权限: chmod 644 *.py"
+    echo
+}
+
+# 自动修复配置
+auto_fix_config() {
+    print_message $BLUE "🔧 尝试自动修复配置..."
+    
+    # 修复文件权限
+    print_message $YELLOW "🔐 修复文件权限..."
+    chmod +x "$PROJECT_DIR/start.sh" 2>/dev/null
+    chmod 644 "$PROJECT_DIR"/*.py 2>/dev/null
+    chmod 644 "$PROJECT_DIR"/*.txt 2>/dev/null
+    print_message $GREEN "✅ 文件权限已修复"
+    
+    # 尝试安装缺少的依赖
+    print_message $YELLOW "📦 检查并安装依赖..."
+    if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+        if command -v pip3 &> /dev/null; then
+            pip3 install -r "$PROJECT_DIR/requirements.txt" --user
+            print_message $GREEN "✅ 依赖安装完成"
+        else
+            print_message $YELLOW "⚠️ pip3 未找到，请手动安装依赖"
+        fi
+    fi
+    
+    # 创建必要的目录
+    mkdir -p "$PROJECT_DIR/logs" 2>/dev/null
+    mkdir -p "$PROJECT_DIR/backups" 2>/dev/null
+    
+    print_message $GREEN "✅ 自动修复完成"
+}
+
 # 检查依赖
 check_dependencies() {
     print_message $BLUE "🔍 检查依赖..."
@@ -1561,6 +1864,387 @@ uninstall_bot() {
     emergency_exit
 }
 
+# 健康检查函数
+health_check() {
+    local pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
+        # 检查进程是否响应（检查日志文件是否在更新）
+        if [ -f "$LOG_FILE" ]; then
+            local last_log_time=$(stat -c %Y "$LOG_FILE" 2>/dev/null || echo 0)
+            local current_time=$(date +%s)
+            local time_diff=$((current_time - last_log_time))
+            
+            # 如果日志文件超过5分钟没有更新，认为可能有问题
+            if [ $time_diff -gt 300 ]; then
+                echo "unresponsive"
+            else
+                echo "healthy"
+            fi
+        else
+            echo "no_log"
+        fi
+    else
+        echo "stopped"
+    fi
+}
+
+# 检查网络连接
+check_network() {
+    if ping -c 1 8.8.8.8 > /dev/null 2>&1; then
+        echo "connected"
+    else
+        echo "disconnected"
+    fi
+}
+
+# 自动重启函数
+auto_restart_bot() {
+    local max_restart_attempts=3
+    local restart_count=0
+    local restart_interval=60  # 重启间隔60秒
+    local restart_log="$PROJECT_DIR/restart.log"
+    
+    while [ $restart_count -lt $max_restart_attempts ]; do
+        local health=$(health_check)
+        local network=$(check_network)
+        
+        case $health in
+            "stopped"|"unresponsive")
+                print_message $YELLOW "🔄 检测到机器人异常 ($health)，正在重启... (尝试 $((restart_count + 1))/$max_restart_attempts)"
+                
+                # 记录重启日志
+                echo "$(date '+%Y-%m-%d %H:%M:%S'): Auto-restart triggered - Status: $health, Network: $network" >> "$restart_log"
+                
+                # 如果网络断开，等待网络恢复
+                if [ "$network" = "disconnected" ]; then
+                    print_message $YELLOW "⚠️ 网络连接异常，等待网络恢复..."
+                    local network_wait=0
+                    while [ $network_wait -lt 10 ]; do
+                        sleep 30
+                        network=$(check_network)
+                        if [ "$network" = "connected" ]; then
+                            print_message $GREEN "✅ 网络连接已恢复"
+                            break
+                        fi
+                        ((network_wait++))
+                    done
+                fi
+                
+                # 停止现有进程
+                stop_bot_silent
+                sleep 5
+                
+                # 重新启动
+                if start_bot_silent; then
+                    print_message $GREEN "✅ 机器人重启成功"
+                    echo "$(date '+%Y-%m-%d %H:%M:%S'): Restart successful" >> "$restart_log"
+                    return 0
+                else
+                    print_message $RED "❌ 机器人重启失败"
+                    echo "$(date '+%Y-%m-%d %H:%M:%S'): Restart failed" >> "$restart_log"
+                    ((restart_count++))
+                    if [ $restart_count -lt $max_restart_attempts ]; then
+                        print_message $YELLOW "⏳ 等待 $restart_interval 秒后重试..."
+                        sleep $restart_interval
+                    fi
+                fi
+                ;;
+            "healthy")
+                return 0
+                ;;
+            "no_log")
+                print_message $YELLOW "⚠️ 日志文件不存在，但进程正在运行"
+                return 0
+                ;;
+        esac
+    done
+    
+    print_message $RED "❌ 达到最大重启次数 ($max_restart_attempts)，请手动检查"
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): Max restart attempts reached" >> "$restart_log"
+    
+    # 发送告警（如果配置了）
+    send_alert "FinalShell Bot 重启失败，需要手动干预"
+    
+    return 1
+}
+
+# 静默启动函数（用于自动重启）
+start_bot_silent() {
+    if [ ! -f "$ENV_FILE" ]; then
+        return 1
+    fi
+    
+    cd "$PROJECT_DIR"
+    
+    # 检查虚拟环境
+    local venv_dir="$PROJECT_DIR/venv"
+    if [ -d "$venv_dir" ]; then
+        source "$venv_dir/bin/activate"
+        PYTHON_CMD="$venv_dir/bin/python"
+    fi
+    
+    # 清理旧进程
+    pkill -f "bot.py" 2>/dev/null
+    sleep 2
+    
+    # 启动机器人
+    nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    echo $pid > "$PID_FILE"
+    
+    # 检查启动是否成功
+    sleep 5
+    if ps -p $pid > /dev/null 2>&1; then
+        return 0
+    else
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+# 静默停止函数
+stop_bot_silent() {
+    local status=$(check_bot_status)
+    if [ "$status" = "stopped" ]; then
+        return 0
+    fi
+    
+    local pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ]; then
+        # 先尝试优雅停止
+        kill $pid 2>/dev/null
+        
+        # 等待进程结束
+        local count=0
+        while ps -p $pid > /dev/null 2>&1 && [ $count -lt 10 ]; do
+            sleep 1
+            ((count++))
+        done
+        
+        # 如果还在运行，强制停止
+        if ps -p $pid > /dev/null 2>&1; then
+            kill -9 $pid 2>/dev/null
+            sleep 1
+        fi
+    fi
+    
+    # 清理所有可能的bot进程
+    pkill -f "bot.py" 2>/dev/null
+    rm -f "$PID_FILE"
+    
+    return 0
+}
+
+# 日志轮转函数
+rotate_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        local log_size=$(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+        local max_size=10485760  # 10MB
+        
+        if [ "$log_size" -gt "$max_size" ]; then
+            local backup_name="$LOG_FILE.$(date +%Y%m%d_%H%M%S)"
+            
+            # 备份当前日志
+            cp "$LOG_FILE" "$backup_name"
+            
+            # 清空当前日志（保持文件句柄）
+            > "$LOG_FILE"
+            
+            # 压缩备份
+            gzip "$backup_name" &
+            
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Log rotated to $backup_name.gz" >> "$LOG_FILE"
+            
+            # 清理超过7天的日志备份
+            find "$(dirname "$LOG_FILE")" -name "bot.log.*.gz" -mtime +7 -delete 2>/dev/null
+        fi
+    fi
+}
+
+# 系统资源检查
+check_system_resources() {
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    local memory_usage=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}')
+    local disk_usage=$(df "$PROJECT_DIR" | tail -1 | awk '{print $5}' | cut -d'%' -f1)
+    
+    # 检查资源使用率是否过高
+    if [ "${cpu_usage%.*}" -gt 80 ] || [ "${memory_usage%.*}" -gt 90 ] || [ "$disk_usage" -gt 90 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): High resource usage - CPU: ${cpu_usage}%, Memory: ${memory_usage}%, Disk: ${disk_usage}%" >> "$PROJECT_DIR/resource.log"
+        return 1
+    fi
+    
+    return 0
+}
+
+# 发送告警函数（可扩展）
+send_alert() {
+    local message="$1"
+    local alert_log="$PROJECT_DIR/alert.log"
+    
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): ALERT - $message" >> "$alert_log"
+    
+    # 这里可以添加更多告警方式，如邮件、webhook等
+    # 例如：curl -X POST "$WEBHOOK_URL" -d "{\"text\":\"$message\"}"
+}
+
+# 监控守护进程
+start_monitor_daemon() {
+    print_message $BLUE "🔍 启动监控守护进程..."
+    
+    # 检查是否已经在运行
+    local monitor_pid_file="$PROJECT_DIR/monitor.pid"
+    if [ -f "$monitor_pid_file" ]; then
+        local existing_pid=$(cat "$monitor_pid_file")
+        if [ -n "$existing_pid" ] && ps -p $existing_pid > /dev/null 2>&1; then
+            print_message $YELLOW "⚠️ 监控守护进程已在运行 (PID: $existing_pid)"
+            return 0
+        else
+            rm -f "$monitor_pid_file"
+        fi
+    fi
+    
+    # 创建监控脚本
+    local monitor_script="$PROJECT_DIR/monitor.sh"
+    cat > "$monitor_script" << 'EOF'
+#!/bin/bash
+
+# 获取项目目录
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 导入主脚本的函数
+source "$PROJECT_DIR/start.sh"
+
+# 监控循环
+while true; do
+    # 健康检查和自动重启
+    if ! auto_restart_bot; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Auto restart failed, sleeping for 5 minutes" >> "$PROJECT_DIR/monitor.log"
+        sleep 300  # 失败后等待5分钟
+        continue
+    fi
+    
+    # 日志轮转
+    rotate_logs
+    
+    # 系统资源检查
+    if ! check_system_resources; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): High resource usage detected" >> "$PROJECT_DIR/monitor.log"
+    fi
+    
+    # 清理临时文件
+    find "$PROJECT_DIR" -name "*.tmp" -mtime +1 -delete 2>/dev/null
+    
+    # 等待60秒
+    sleep 60
+done
+EOF
+    
+    chmod +x "$monitor_script"
+    
+    # 启动监控进程
+    nohup "$monitor_script" > "$PROJECT_DIR/monitor.log" 2>&1 &
+    local monitor_pid=$!
+    echo $monitor_pid > "$monitor_pid_file"
+    
+    print_message $GREEN "✅ 监控守护进程已启动 (PID: $monitor_pid)"
+    print_message $CYAN "📋 监控日志: $PROJECT_DIR/monitor.log"
+}
+
+# 停止监控守护进程
+stop_monitor_daemon() {
+    local monitor_pid_file="$PROJECT_DIR/monitor.pid"
+    if [ -f "$monitor_pid_file" ]; then
+        local monitor_pid=$(cat "$monitor_pid_file")
+        if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+            kill $monitor_pid 2>/dev/null
+            
+            # 等待进程结束
+            local count=0
+            while ps -p $monitor_pid > /dev/null 2>&1 && [ $count -lt 5 ]; do
+                sleep 1
+                ((count++))
+            done
+            
+            # 强制停止
+            if ps -p $monitor_pid > /dev/null 2>&1; then
+                kill -9 $monitor_pid 2>/dev/null
+            fi
+            
+            rm -f "$monitor_pid_file"
+            print_message $GREEN "✅ 监控守护进程已停止"
+        else
+            rm -f "$monitor_pid_file"
+            print_message $YELLOW "⚠️ 监控守护进程未在运行"
+        fi
+    else
+        print_message $YELLOW "⚠️ 监控守护进程未在运行"
+    fi
+}
+
+# 检查监控守护进程状态
+check_monitor_status() {
+    local monitor_pid_file="$PROJECT_DIR/monitor.pid"
+    if [ -f "$monitor_pid_file" ]; then
+        local monitor_pid=$(cat "$monitor_pid_file")
+        if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+            echo "running"
+        else
+            echo "stopped"
+        fi
+    else
+        echo "stopped"
+    fi
+}
+
+# 显示系统状态
+show_system_status() {
+    print_message $BLUE "📊 系统状态报告"
+    echo
+    
+    # 机器人状态
+    local bot_status=$(check_bot_status)
+    if [ "$bot_status" = "running" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        print_message $GREEN "🤖 机器人状态: ✅ 运行中 (PID: $pid)"
+    else
+        print_message $RED "🤖 机器人状态: ❌ 未运行"
+    fi
+    
+    # 监控守护进程状态
+    local monitor_status=$(check_monitor_status)
+    if [ "$monitor_status" = "running" ]; then
+        local monitor_pid=$(cat "$PROJECT_DIR/monitor.pid" 2>/dev/null)
+        print_message $GREEN "🔍 监控守护进程: ✅ 运行中 (PID: $monitor_pid)"
+    else
+        print_message $RED "🔍 监控守护进程: ❌ 未运行"
+    fi
+    
+    # 网络状态
+    local network=$(check_network)
+    if [ "$network" = "connected" ]; then
+        print_message $GREEN "🌐 网络连接: ✅ 正常"
+    else
+        print_message $RED "🌐 网络连接: ❌ 异常"
+    fi
+    
+    # 系统资源
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "N/A")
+    local memory_usage=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "N/A")
+    local disk_usage=$(df "$PROJECT_DIR" | tail -1 | awk '{print $5}' 2>/dev/null || echo "N/A")
+    
+    print_message $CYAN "💻 CPU 使用率: ${cpu_usage}%"
+    print_message $CYAN "🧠 内存使用率: ${memory_usage}%"
+    print_message $CYAN "💾 磁盘使用率: ${disk_usage}"
+    
+    # 日志文件大小
+    if [ -f "$LOG_FILE" ]; then
+        local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
+        print_message $CYAN "📋 日志文件大小: $log_size"
+    fi
+    
+    echo
+}
+
 # 日志管理功能
 manage_logs() {
     print_message $BLUE "📋 日志管理..."
@@ -1769,6 +2453,16 @@ show_menu() {
         echo -e "${RED}配置状态: ❌ 未配置${NC}"
     fi
     
+    # 显示Guard状态
+    local guard_status="❌ 未运行"
+    if [ -f "$PROJECT_DIR/guard.pid" ]; then
+        local guard_pid=$(cat "$PROJECT_DIR/guard.pid" 2>/dev/null)
+        if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
+            guard_status="✅ 正在运行"
+        fi
+    fi
+    echo -e "${CYAN}Guard状态: $guard_status${NC}"
+    
     # 显示日志文件状态
     if [ -f "$LOG_FILE" ]; then
         local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1 || echo "未知")
@@ -1778,6 +2472,7 @@ show_menu() {
     fi
     
     echo
+    echo -e "${BLUE}=== 🤖 机器人管理 ===${NC}"
     echo -e "${CYAN}[1] 启动/重启机器人${NC}"
     echo -e "${CYAN}[2] 停止机器人${NC}"
     echo -e "${CYAN}[3] 日志管理${NC}"
@@ -1787,17 +2482,28 @@ show_menu() {
     echo -e "${CYAN}[7] 重新安装依赖${NC}"
     echo -e "${CYAN}[8] 检查/修复虚拟环境${NC}"
     echo -e "${CYAN}[9] 卸载机器人${NC}"
-    
-    # 根据配置状态显示不同选项
-    if [ -f "$ENV_FILE" ]; then
-        echo -e "${CYAN}[c] 重新配置Bot Token和Chat ID${NC}"
-    else
-        echo -e "${RED}[c] 配置Bot Token和Chat ID (必需)${NC}"
-    fi
-    
+    echo
+    echo -e "${BLUE}=== 🛡️ 守护进程管理 ===${NC}"
+    echo -e "${CYAN}[g] Guard 守护进程管理${NC}"
+    echo
+    echo -e "${BLUE}=== ⚙️ 系统配置 ===${NC}"
+    echo -e "${CYAN}[c] 配置Bot Token和Chat ID${NC}"
+    echo -e "${CYAN}[m] 启动/停止监控守护进程${NC}"
+    echo -e "${CYAN}[s] 显示系统状态${NC}"
+    echo -e "${CYAN}[r] 手动重启机器人${NC}"
+    echo -e "${CYAN}[v] 验证配置${NC}"
+    echo -e "${CYAN}[f] 修复配置${NC}"
+    echo
     echo -e "${CYAN}[0] 退出${NC}"
     echo
-    echo -e "${YELLOW}💡 提示: Ctrl+C 已被屏蔽，请使用菜单选项退出${NC}"
+    
+    # 根据配置状态显示不同提示
+    if [ -f "$ENV_FILE" ]; then
+        echo -e "${GREEN}💡 提示: 配置已完成，可以启动机器人${NC}"
+    else
+        echo -e "${RED}💡 提示: 请先配置Bot Token和Chat ID${NC}"
+    fi
+    echo -e "${YELLOW}💡 提示: 使用 [g] 进入Guard守护进程管理${NC}"
     echo
 }
 
@@ -1811,8 +2517,39 @@ quick_check_dependencies() {
     fi
 }
 
+# 检查并激活虚拟环境
+check_and_activate_venv() {
+    local venv_dir="$PROJECT_DIR/venv"
+    
+    if [ -d "$venv_dir" ]; then
+        if [ -z "$VIRTUAL_ENV" ]; then
+            print_message $BLUE "🐍 激活虚拟环境..."
+            source "$venv_dir/bin/activate"
+            
+            if [ -n "$VIRTUAL_ENV" ]; then
+                print_message $GREEN "✅ 虚拟环境已激活: $(basename "$VIRTUAL_ENV")"
+                # 更新Python命令
+                PYTHON_CMD="$venv_dir/bin/python"
+                PIP_CMD="$venv_dir/bin/pip"
+            else
+                print_message $RED "❌ 虚拟环境激活失败"
+                exit 1
+            fi
+        else
+            print_message $GREEN "✅ 虚拟环境已激活: $(basename "$VIRTUAL_ENV")"
+        fi
+    else
+        print_message $RED "❌ 虚拟环境不存在: $venv_dir"
+        print_message $YELLOW "请重新运行安装脚本或手动创建虚拟环境"
+        exit 1
+    fi
+}
+
 # 主函数
 main() {
+    # 检查并激活虚拟环境
+    check_and_activate_venv
+    
     # 显示欢迎信息
     clear
     echo -e "${PURPLE}================================${NC}"
@@ -1937,7 +2674,7 @@ main() {
     # 主菜单循环
     while true; do
         show_menu
-        read -p "请选择操作 [0-9c]: " choice
+        read -p "请选择操作 [0-9cgmsvrf]: " choice
         
         case $choice in
             1)
@@ -1974,6 +2711,9 @@ main() {
             9)
                 uninstall_bot
                 ;;
+            g|G)
+                open_guard_menu
+                ;;
             c|C)
                 print_message $BLUE "⚙️ 配置Bot Token和Chat ID..."
                 setup_environment
@@ -1981,11 +2721,63 @@ main() {
                     print_message $GREEN "✅ 配置完成！现在可以启动机器人了"
                 fi
                 ;;
+            m|M)
+                local monitor_status=$(check_monitor_status)
+                if [ "$monitor_status" = "running" ]; then
+                    print_message $YELLOW "监控守护进程正在运行，是否停止？"
+                    read -p "停止监控守护进程? (y/N): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        stop_monitor_daemon
+                    fi
+                else
+                    print_message $BLUE "启动监控守护进程..."
+                    start_monitor_daemon
+                fi
+                ;;
+            s|S)
+                show_system_status
+                read -p "按回车键继续..." -r
+                ;;
+            r|R)
+                print_message $BLUE "手动重启机器人..."
+                if auto_restart_bot; then
+                    print_message $GREEN "✅ 机器人重启成功"
+                else
+                    print_message $RED "❌ 机器人重启失败"
+                fi
+                read -p "按回车键继续..." -r
+                ;;
+            v|V)
+                echo
+                if validate_configuration; then
+                    print_message $GREEN "🎉 配置验证通过，可以启动机器人！"
+                else
+                    echo
+                    show_config_fix_suggestions
+                    echo
+                    read -p "是否尝试自动修复? (y/N): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        auto_fix_config
+                        echo
+                        print_message $BLUE "请重新验证配置"
+                    fi
+                fi
+                read -p "按回车键继续..." -r
+                ;;
+            f|F)
+                print_message $BLUE "🔧 开始自动修复配置..."
+                auto_fix_config
+                echo
+                print_message $BLUE "修复完成，建议重新验证配置"
+                read -p "按回车键继续..." -r
+                ;;
             0)
                 safe_exit
                 ;;
             *)
-                print_message $RED "❌ 无效选择，请输入 0-9 或 c"
+                print_message $RED "❌ 无效选择，请输入 0-9、g、c、m、s、v、r 或 f"
                 ;;
         esac
         
@@ -1994,5 +2786,163 @@ main() {
     done
 }
 
+# Guard菜单调用函数
+open_guard_menu() {
+    print_message $BLUE "🛡️ 进入Guard守护进程管理..."
+    
+    # 检查guard.sh是否存在
+    if [ ! -f "$PROJECT_DIR/guard.sh" ]; then
+        print_message $RED "❌ guard.sh文件不存在"
+        print_message $YELLOW "请确保Guard守护程序已正确安装"
+        read -p "按回车键返回主菜单..." -r
+        return
+    fi
+    
+    # 设置返回标志
+    export GUARD_RETURN_TO_MAIN="true"
+    export MAIN_MENU_PATH="$PROJECT_DIR/start.sh"
+    
+    # 调用guard.sh菜单
+    cd "$PROJECT_DIR"
+    bash guard.sh
+    
+    # 清除返回标志
+    unset GUARD_RETURN_TO_MAIN
+    unset MAIN_MENU_PATH
+    
+    print_message $CYAN "🔙 已返回主菜单"
+}
+
+# 监控管理菜单
+monitor_menu() {
+    while true; do
+        clear
+        echo -e "${PURPLE}================================${NC}"
+        echo -e "${PURPLE}        监控管理菜单${NC}"
+        echo -e "${PURPLE}================================${NC}"
+        
+        # 检查监控状态
+        local monitor_pid_file="$PROJECT_DIR/monitor.pid"
+        local monitor_status="❌ 未运行"
+        if [ -f "$monitor_pid_file" ]; then
+            local monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null)
+            if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+                monitor_status="✅ 正在运行 (PID: $monitor_pid)"
+            else
+                monitor_status="❌ 未运行"
+                rm -f "$monitor_pid_file"
+            fi
+        fi
+        
+        echo -e "监控状态: ${monitor_status}"
+        
+        # 显示健康检查结果
+        local health=$(health_check)
+        local health_text=""
+        case $health in
+            "healthy")
+                health_text="✅ 健康"
+                ;;
+            "stopped")
+                health_text="❌ 已停止"
+                ;;
+            "unresponsive")
+                health_text="⚠️ 无响应"
+                ;;
+            "no_log")
+                health_text="⚠️ 无日志"
+                ;;
+        esac
+        echo -e "机器人健康: ${health_text}"
+        
+        echo
+        echo -e "${CYAN}[1] 启动监控守护进程${NC}"
+        echo -e "${CYAN}[2] 停止监控守护进程${NC}"
+        echo -e "${CYAN}[3] 手动健康检查${NC}"
+        echo -e "${CYAN}[4] 手动重启机器人${NC}"
+        echo -e "${CYAN}[5] 查看监控日志${NC}"
+        echo -e "${CYAN}[6] 查看重启日志${NC}"
+        echo -e "${CYAN}[7] 手动日志轮转${NC}"
+        echo -e "${CYAN}[0] 返回主菜单${NC}"
+        echo
+        
+        read -p "请选择操作 [0-7]: " monitor_choice
+        
+        case $monitor_choice in
+            1)
+                if [ -f "$monitor_pid_file" ]; then
+                    local monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null)
+                    if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+                        print_message $YELLOW "⚠️ 监控守护进程已在运行"
+                    else
+                        start_monitor_daemon
+                    fi
+                else
+                    start_monitor_daemon
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            2)
+                stop_monitor_daemon
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            3)
+                print_message $BLUE "🔍 执行健康检查..."
+                local health=$(health_check)
+                case $health in
+                    "healthy")
+                        print_message $GREEN "✅ 机器人运行正常"
+                        ;;
+                    "stopped")
+                        print_message $RED "❌ 机器人已停止"
+                        ;;
+                    "unresponsive")
+                        print_message $YELLOW "⚠️ 机器人可能无响应（日志超过5分钟未更新）"
+                        ;;
+                    "no_log")
+                        print_message $YELLOW "⚠️ 进程运行但无日志文件"
+                        ;;
+                esac
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            4)
+                print_message $BLUE "🔄 手动重启机器人..."
+                auto_restart_bot
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            5)
+                if [ -f "$PROJECT_DIR/monitor.log" ]; then
+                    print_message $BLUE "📋 监控日志（最后50行）:"
+                    tail -n 50 "$PROJECT_DIR/monitor.log"
+                else
+                    print_message $YELLOW "⚠️ 监控日志文件不存在"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            6)
+                if [ -f "$LOG_FILE.restart" ]; then
+                    print_message $BLUE "📋 重启日志:"
+                    cat "$LOG_FILE.restart"
+                else
+                    print_message $YELLOW "⚠️ 重启日志文件不存在"
+                fi
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            7)
+                print_message $BLUE "🔄 执行日志轮转..."
+                rotate_logs
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+            0)
+                return
+                ;;
+            *)
+                print_message $RED "❌ 无效选择"
+                read -p "按任意键继续..." -n 1 -r
+                ;;
+        esac
+    done
+}
+
 # 运行主函数
-main 
+main
