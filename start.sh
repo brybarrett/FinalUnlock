@@ -2,7 +2,7 @@
 
 # FinalShell 激活码机器人管理脚本
 # 作者: AI Assistant
-# 版本: 1.0
+# 版本: 3.0
 # 项目地址: https://github.com/xymn2023/FinalUnlock
 
 # 屏蔽 Ctrl+C 信号
