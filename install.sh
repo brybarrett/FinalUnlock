@@ -137,6 +137,7 @@ check_python_and_venv() {
 }
 
 # 创建虚拟环境
+# 在create_virtual_environment函数中，项目下载成功后添加权限设置
 create_virtual_environment() {
     print_message $BLUE "🐍 创建虚拟环境..."
     
@@ -168,6 +169,11 @@ create_virtual_environment() {
     fi
     
     cd "$INSTALL_DIR"
+    
+    # 🔧 新增：设置shell脚本执行权限
+    print_message $YELLOW "🔐 设置脚本执行权限..."
+    chmod +x *.sh 2>/dev/null || true
+    print_message $GREEN "✅ 脚本权限设置完成"
     
     # 创建虚拟环境
     local venv_dir="$INSTALL_DIR/venv"

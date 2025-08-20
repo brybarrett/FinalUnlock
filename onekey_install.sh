@@ -191,6 +191,7 @@ detailed_system_check() {
 }
 
 # 添加手动安装备选方案
+# 在manual_installation_fallback函数中，项目克隆成功后添加
 manual_installation_fallback() {
     print_message $YELLOW "🔧 尝试手动安装备选方案..."
     
@@ -206,6 +207,11 @@ manual_installation_fallback() {
     fi
     
     cd "$install_dir"
+    
+    # 🔧 新增：设置shell脚本执行权限
+    print_message $YELLOW "🔐 设置脚本执行权限..."
+    chmod +x *.sh 2>/dev/null || true
+    print_message $GREEN "✅ 脚本权限设置完成"
     
     # 创建虚拟环境
     print_message $BLUE "🐍 创建虚拟环境..."
