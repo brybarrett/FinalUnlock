@@ -25,6 +25,13 @@ error() { msg "$1" "$RED"; }
 warn() { msg "$1" "$YELLOW"; }
 info() { msg "$1" "$BLUE"; }
 
+# Ctrl+C处理函数
+handle_ctrl_c() {
+    echo ""
+    warn "⚠️ 请使用菜单选项 [0] 正常退出程序"
+    echo -n "请选择操作 [0-8]: "
+}
+
 # 检查权限
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -457,6 +464,7 @@ start_service() {
         msg "2. 检查配置文件: cat /usr/local/FinalUnlock/.env"
         msg "3. 手动测试: cd /usr/local/FinalUnlock && source venv/bin/activate && python bot.py"
         msg "4. 查看系统日志: journalctl -u $SERVICE_NAME -f"
+        msg ""
     fi
 }
 
@@ -501,10 +509,30 @@ show_status() {
 
 # 查看日志
 show_logs() {
+    clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
+        info "📋 实时日志监控"
+        msg "提示：按 Ctrl+C 返回主菜单"
+        echo "================================"
+        
+        # 临时恢复Ctrl+C功能以便退出日志查看
+        trap - SIGINT
+        
+        # 显示最近的日志并持续监控
         tail -f "$INSTALL_DIR/bot.log"
+        
+        # 日志查看结束后重新屏蔽Ctrl+C
+        trap '' SIGINT
+        
     else
-        error "日志文件不存在"
+        error "❌ 日志文件不存在: $INSTALL_DIR/bot.log"
+        msg ""
+        msg "💡 可能原因："
+        msg "1. 机器人尚未启动过"
+        msg "2. 日志文件路径有误"
+        msg "3. 权限不足"
+        echo ""
+        read -p "按回车返回主菜单..."
     fi
 }
 
@@ -528,7 +556,7 @@ uninstall() {
         
         msg "✅ 卸载完成"
     else
-        info "取消卸载"
+        info "✋ 取消卸载，返回主菜单"
     fi
 }
 
@@ -628,7 +656,9 @@ show_menu() {
     msg "[6] 重新配置" "$CYAN"
     msg "[7] 更新代码" "$CYAN"
     msg "[8] 卸载程序" "$CYAN"
-    msg "[0] 退出" "$CYAN"
+    msg "[0] 退出程序" "$CYAN"
+    echo
+    msg "💡 提示：请使用菜单选项退出，Ctrl+C已屏蔽" "$YELLOW"
     echo
 }
 
@@ -753,6 +783,9 @@ main() {
                 exit 1
             fi
             
+            # 屏蔽Ctrl+C，只能通过菜单退出
+            trap 'handle_ctrl_c' SIGINT
+            
             while true; do
                 show_menu
                 echo -n "请选择操作 [0-8]: "
@@ -766,9 +799,23 @@ main() {
                     5) show_logs ;;
                     6) reconfig; read -p "按回车继续..." ;;
                     7) update_code; read -p "按回车继续..." ;;
-                    8) uninstall; break ;;
-                    0) break ;;
-                    *) error "无效选择"; sleep 1 ;;
+                    8) 
+                        uninstall
+                        clear
+                        msg "👋 FinalUnlock 已完全卸载！"
+                        # 恢复Ctrl+C功能
+                        trap - SIGINT
+                        break 
+                        ;;
+                    0) 
+                        clear
+                        msg "👋 感谢使用 FinalUnlock 管理脚本！"
+                        msg "💡 随时可以运行 'fn-bot' 重新进入管理界面"
+                        # 恢复Ctrl+C功能
+                        trap - SIGINT
+                        break 
+                        ;;
+                    *) error "无效选择"; read -p "按回车继续..." ;;
                 esac
             done
             ;;
