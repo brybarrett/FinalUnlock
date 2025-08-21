@@ -1,6 +1,6 @@
 # 🚀 FinalUnlock - FinalShell激活码生成机器人-精简版
 
-[FinalShell激活码完整版]（https://github.com/xymn2023/finalunlock-all）
+[FinalShell激活码完整版](https://github.com/xymn2023/finalunlock-all)
 
 ## 📋 项目简介
 
@@ -175,4 +175,5 @@ MIT License - 自由使用，修改和分发
 
 
 **🎉 享受简单高效的FinalShell激活码生成体验！**
+
 
