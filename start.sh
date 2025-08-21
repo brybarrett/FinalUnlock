@@ -468,22 +468,47 @@ uninstall_bot_with_cleanup() {
     # 首先停止所有相关进程（最彻底的清理）
     print_message $BLUE "🛑 第一步：停止所有运行中的进程..."
     
-    # 停止主进程
+    # 🔥 停止主进程（使用kill -9）
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-            print_message $CYAN "强制停止主进程 (PID: $pid)..."
+            print_message $CYAN "💥 强制停止主进程 (PID: $pid)..."
             kill -9 $pid 2>/dev/null || true
         fi
     fi
     
-    # 查找并停止所有相关进程
-    local all_pids=$(ps aux | grep -E "(python.*bot\.py|FinalUnlock)" | grep -v grep | awk '{print $2}' || true)
+    # 🔥 强制停止所有bot和guard进程（使用kill -9）
+    print_message $CYAN "🔄 强制清理bot进程..."
+    local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
+    if [ -n "$bot_pids" ]; then
+        print_message $CYAN "发现bot进程，正在强制清理..."
+        echo "$bot_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $CYAN "   💥 强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    print_message $CYAN "🔄 强制清理guard进程..."
+    local guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
+    if [ -n "$guard_pids" ]; then
+        print_message $CYAN "发现guard进程，正在强制清理..."
+        echo "$guard_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $CYAN "   💥 强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # 通用清理所有相关进程
+    local all_pids=$(ps aux | grep -E "(python.*(bot|guard)\.py|FinalUnlock)" | grep -v grep | awk '{print $2}' || true)
     if [ -n "$all_pids" ]; then
-        print_message $CYAN "发现相关进程，正在清理..."
+        print_message $CYAN "发现其他相关进程，正在清理..."
         echo "$all_pids" | while read -r pid; do
             if [ -n "$pid" ] && [ "$pid" != "$$" ]; then
-                print_message $CYAN "   强制停止进程 PID: $pid"
+                print_message $CYAN "   💥 强制停止进程 PID: $pid"
                 kill -9 $pid 2>/dev/null || true
             fi
         done
@@ -2850,91 +2875,76 @@ uninstall_bot() {
 uninstall_project_files() {
     print_message $BLUE "🗑️ 删除项目文件..."
     
-    # 🔧 彻底停止所有bot和guard进程 - 使用强制清理逻辑
+    # 🔧 彻底停止所有bot和guard进程 - 使用统一的强制清理逻辑
     print_message $YELLOW "🛑 彻底停止所有相关进程..."
     
-    # === 强制清理bot进程 ===
-    print_message $YELLOW "🔄 清理bot进程..."
+    # === 🔥 强制清理bot进程（使用kill -9）===
+    print_message $YELLOW "🔄 强制清理bot进程..."
     
-    # 方法1：通过PID文件停止
+    # 方法1：通过PID文件强制停止
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-            kill $pid 2>/dev/null || true
-            sleep 3
-            if ps -p $pid > /dev/null 2>&1; then
-                kill -9 $pid 2>/dev/null || true
-            fi
+            print_message $CYAN "   💥 强制停止PID文件中的进程 (PID: $pid)"
+            kill -9 $pid 2>/dev/null || true
         fi
     fi
     
-    # 方法2：停止所有bot.py进程
+    # 方法2：强制停止所有bot.py进程
     local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
     if [ -n "$bot_pids" ]; then
+        print_message $CYAN "   发现bot进程，正在强制清理..."
         echo "$bot_pids" | while read -r pid; do
             if [ -n "$pid" ]; then
-                kill $pid 2>/dev/null || true
+                print_message $CYAN "     💥 强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
             fi
         done
-        sleep 3
-        
-        # 强制停止残留进程
-        bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-        if [ -n "$bot_pids" ]; then
-            echo "$bot_pids" | while read -r pid; do
-                if [ -n "$pid" ]; then
-                    kill -9 $pid 2>/dev/null || true
-                fi
-            done
-        fi
     fi
     
-    # 方法3：pkill清理
-    pkill -f "bot.py" 2>/dev/null || true
+    # 方法3：pkill强制清理
+    pkill -9 -f "bot.py" 2>/dev/null || true
     
-    # === 强制清理guard进程 ===
-    print_message $YELLOW "🔄 清理guard进程..."
+    # === 🔥 强制清理guard进程（使用kill -9）===
+    print_message $YELLOW "🔄 强制清理guard进程..."
     
-    # 方法1：通过PID文件停止
+    # 方法1：通过PID文件强制停止
     if [ -f "$PROJECT_DIR/guard.pid" ]; then
         local guard_pid=$(cat "$PROJECT_DIR/guard.pid" 2>/dev/null)
         if [ -n "$guard_pid" ] && ps -p $guard_pid > /dev/null 2>&1; then
-            kill $guard_pid 2>/dev/null || true
-            sleep 3
-            if ps -p $guard_pid > /dev/null 2>&1; then
-                kill -9 $guard_pid 2>/dev/null || true
-            fi
+            print_message $CYAN "   💥 强制停止guard进程 (PID: $guard_pid)"
+            kill -9 $guard_pid 2>/dev/null || true
         fi
     fi
     
-    # 方法2：停止所有guard.py进程
+    # 方法2：强制停止所有guard.py进程
     local guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
     if [ -n "$guard_pids" ]; then
+        print_message $CYAN "   发现guard进程，正在强制清理..."
         echo "$guard_pids" | while read -r pid; do
             if [ -n "$pid" ]; then
-                kill $pid 2>/dev/null || true
+                print_message $CYAN "     💥 强制停止进程 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
             fi
         done
-        sleep 3
-        
-        # 强制停止残留进程
-        guard_pids=$(pgrep -f "python.*guard.py" 2>/dev/null || true)
-        if [ -n "$guard_pids" ]; then
-            echo "$guard_pids" | while read -r pid; do
-                if [ -n "$pid" ]; then
-                    kill -9 $pid 2>/dev/null || true
-                fi
-            done
-        fi
     fi
     
-    # 方法3：pkill清理
-    pkill -f "guard.py" 2>/dev/null || true
+    # 方法3：pkill强制清理
+    pkill -9 -f "guard.py" 2>/dev/null || true
+    
+    # === 🔥 强制清理监控进程（使用kill -9）===
+    if [ -f "$PROJECT_DIR/monitor.pid" ]; then
+        local monitor_pid=$(cat "$PROJECT_DIR/monitor.pid" 2>/dev/null)
+        if [ -n "$monitor_pid" ] && ps -p $monitor_pid > /dev/null 2>&1; then
+            print_message $CYAN "   💥 强制停止监控进程 (PID: $monitor_pid)"
+            kill -9 $monitor_pid 2>/dev/null || true
+        fi
+    fi
     
     # 清理PID文件
     rm -f "$PID_FILE" "$PROJECT_DIR/guard.pid" "$PROJECT_DIR/monitor.pid"
     
-    print_message $GREEN "✅ 所有进程已彻底停止"
+    print_message $GREEN "✅ 所有进程已强制停止（使用kill -9）"
     
     # 停止监控守护进程
     if [ -f "$PROJECT_DIR/monitor.pid" ]; then
