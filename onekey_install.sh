@@ -668,6 +668,18 @@ start_services() {
 # ==========================================
 
 auto_start_bot() {
+    # 🔒 强制检查所有测试相关模式
+    if [ "${TESTING_MODE:-}" = "true" ] || [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+        print_message $YELLOW "🔒 检测到测试模式，强制跳过自动启动机器人"
+        return 0
+    fi
+    
+    # 🔒 检查测试锁文件
+    if [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        print_message $YELLOW "🔒 检测到API测试锁，强制跳过自动启动机器人"
+        return 0
+    fi
+    
     print_message $BLUE "🚀 第五步：自动启动机器人..."
     
     # 查找项目目录
@@ -830,18 +842,28 @@ unified_start_bot() {
     echo $$ > "$startup_lock"
     print_message $BLUE "🔒 已获取启动锁，确保独占启动..."
     
-    # 清理可能存在的冲突进程（测试模式下跳过）
-    if [ "${TESTING_MODE:-}" != "true" ]; then
-        local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
-        if [ -n "$existing_pids" ]; then
-            print_message $YELLOW "💥 清理冲突进程: $existing_pids"
-            echo "$existing_pids" | while read -r pid; do
-                kill -9 $pid 2>/dev/null || true
-            done
-            sleep 2
-        fi
-    else
-        print_message $BLUE "🧪 测试模式：跳过进程清理"
+    # 🔒 强制检查所有测试相关模式，绝对不启动bot
+    if [ "${TESTING_MODE:-}" = "true" ] || [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+        print_message $YELLOW "🔒 检测到测试模式，强制取消bot启动"
+        rm -f "$startup_lock"
+        return 1
+    fi
+    
+    # 🔒 检查测试锁文件
+    if [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        print_message $YELLOW "🔒 检测到API测试锁，强制取消bot启动"
+        rm -f "$startup_lock"
+        return 1
+    fi
+    
+    # 清理可能存在的冲突进程（非测试模式）
+    local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$existing_pids" ]; then
+        print_message $YELLOW "💥 清理冲突进程: $existing_pids"
+        echo "$existing_pids" | while read -r pid; do
+            kill -9 $pid 2>/dev/null || true
+        done
+        sleep 2
     fi
     
     # 启动机器人
@@ -968,13 +990,20 @@ EOF
 
 safe_test_bot_function() {
     print_message $BLUE "🧪 测试机器人功能..."
+    print_message $CYAN "🔒 强制模式：仅使用API测试，绝不影响运行中的bot进程"
     
-    # 设置严格的测试模式环境变量，防止任何进程清理
+    # 🔒 强制锁死所有可能的进程操作
     export TESTING_MODE="true"
-    export SKIP_AUTO_FIX="true"
+    export SKIP_AUTO_FIX="true" 
     export NO_PROCESS_CLEANUP="true"
+    export MANAGEMENT_MENU_ACTIVE="true"
+    export FORCE_API_ONLY_TEST="true"
     
-    # 查找项目目录，但不改变当前目录
+    # 🔒 设置进程锁，防止任何其他脚本干涉
+    local test_lock="/tmp/finalunlock_test_api_only.lock"
+    echo $$ > "$test_lock"
+    
+    # 查找项目目录，但绝不改变当前目录
     local project_dir=""
     for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
         if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
@@ -986,18 +1015,19 @@ safe_test_bot_function() {
     if [ -z "$project_dir" ]; then
         print_message $RED "❌ 配置文件不存在"
         print_message $YELLOW "💡 请先完成机器人配置"
+        rm -f "$test_lock"
         read -p "按回车键继续..." -r
         return
     fi
     
-    # 安全地读取.env文件，避免执行其中的命令
+    # 🔒 纯文本读取.env文件，绝对不执行任何命令，不使用source
     local BOT_TOKEN=""
     local CHAT_ID=""
     
     if [ -f "$project_dir/.env" ]; then
-        # 使用更安全的方法读取环境变量，绝对不执行任何命令
-        BOT_TOKEN=$(grep "^BOT_TOKEN=" "$project_dir/.env" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
-        CHAT_ID=$(grep "^CHAT_ID=" "$project_dir/.env" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
+        # 🔒 最安全的读取方法：纯文本处理，绝不执行任何命令
+        BOT_TOKEN=$(cat "$project_dir/.env" | grep "^BOT_TOKEN=" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
+        CHAT_ID=$(cat "$project_dir/.env" | grep "^CHAT_ID=" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
     fi
     
     if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
@@ -1064,11 +1094,17 @@ safe_test_bot_function() {
     
     print_message $BLUE "🧪 测试完成"
     print_message $CYAN "💡 此测试功能完全独立运行，不会影响任何正在运行的进程"
+    print_message $GREEN "🔒 强制API模式测试成功，现有bot进程完全未受影响"
     
-    # 清除测试模式环境变量
+    # 🔒 清理测试锁文件
+    rm -f "$test_lock"
+    
+    # 🔒 清除所有测试模式环境变量
     export TESTING_MODE=""
     export SKIP_AUTO_FIX=""
     export NO_PROCESS_CLEANUP=""
+    export MANAGEMENT_MENU_ACTIVE=""
+    export FORCE_API_ONLY_TEST=""
     
     read -p "按回车键继续..." -r
 }
@@ -1078,15 +1114,21 @@ safe_test_bot_function() {
 # ==========================================
 
 final_verification_and_fix() {
-    # 检查是否在测试模式下，避免干扰正在运行的bot
-    if [ "${TESTING_MODE:-}" = "true" ]; then
-        print_message $YELLOW "⏭️ 测试模式下跳过最终验证和修复"
+    # 🔒 强制检查所有测试相关的环境变量
+    if [ "${TESTING_MODE:-}" = "true" ] || [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 检测到测试模式，强制跳过最终验证和修复"
         return 0
     fi
     
     # 检查是否在管理菜单循环中，避免重复执行
     if [ "${MANAGEMENT_MENU_ACTIVE:-}" = "true" ]; then
         print_message $YELLOW "⏭️ 管理菜单活跃时跳过最终验证和修复"
+        return 0
+    fi
+    
+    # 🔒 检查是否有测试锁文件存在
+    if [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        print_message $YELLOW "⏭️ 检测到API测试锁，跳过最终验证和修复"
         return 0
     fi
     
@@ -1803,15 +1845,21 @@ show_management_menu() {
 
 # 自动系统修复
 auto_system_fix() {
-    # 检查是否在测试模式下，避免干扰正在运行的bot
-    if [ "${TESTING_MODE:-}" = "true" ]; then
-        print_message $YELLOW "⏭️ 测试模式下跳过自动系统修复"
+    # 🔒 强制检查所有测试相关的环境变量
+    if [ "${TESTING_MODE:-}" = "true" ] || [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 检测到测试模式，强制跳过自动系统修复"
         return 0
     fi
     
     # 检查是否在管理菜单循环中，避免重复执行
     if [ "${MANAGEMENT_MENU_ACTIVE:-}" = "true" ]; then
         print_message $YELLOW "⏭️ 管理菜单活跃时跳过自动系统修复"
+        return 0
+    fi
+    
+    # 🔒 检查是否有测试锁文件存在
+    if [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        print_message $YELLOW "⏭️ 检测到API测试锁，跳过自动系统修复"
         return 0
     fi
     
@@ -1908,8 +1956,8 @@ auto_system_fix() {
             fi
         fi
         
-        # 自动修复3：检查systemd服务（测试模式下跳过）
-        if command -v systemctl &> /dev/null && [ "${TESTING_MODE:-}" != "true" ]; then
+        # 自动修复3：检查systemd服务（所有测试模式下都跳过）
+        if command -v systemctl &> /dev/null && [ "${TESTING_MODE:-}" != "true" ] && [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ "${NO_PROCESS_CLEANUP:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
             if ! systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
                 print_message $YELLOW "🔄 systemd服务未启用，正在自动创建..."
                 # 尝试创建服务（如果有sudo权限）
