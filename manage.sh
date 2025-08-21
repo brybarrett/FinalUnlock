@@ -512,17 +512,24 @@ show_logs() {
     clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
         info "📋 实时日志监控"
-        msg "提示：按 Ctrl+C 返回主菜单"
+        msg "提示：按任意键返回主菜单"
         echo "================================"
         
-        # 临时恢复Ctrl+C功能以便退出日志查看
-        trap - SIGINT
+        # 在后台启动tail，获取其PID
+        tail -f "$INSTALL_DIR/bot.log" &
+        local tail_pid=$!
         
-        # 显示最近的日志并持续监控
-        tail -f "$INSTALL_DIR/bot.log"
+        # 等待用户按任意键
+        read -n 1 -s -p ""
         
-        # 日志查看结束后重新屏蔽Ctrl+C
-        trap '' SIGINT
+        # 杀死tail进程
+        kill $tail_pid 2>/dev/null || true
+        wait $tail_pid 2>/dev/null || true
+        
+        echo ""
+        echo "================================"
+        msg "📋 已返回主菜单"
+        sleep 1
         
     else
         error "❌ 日志文件不存在: $INSTALL_DIR/bot.log"
