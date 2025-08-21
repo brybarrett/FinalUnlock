@@ -830,14 +830,18 @@ unified_start_bot() {
     echo $$ > "$startup_lock"
     print_message $BLUE "🔒 已获取启动锁，确保独占启动..."
     
-    # 清理可能存在的冲突进程
-    local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
-    if [ -n "$existing_pids" ]; then
-        print_message $YELLOW "💥 清理冲突进程: $existing_pids"
-        echo "$existing_pids" | while read -r pid; do
-            kill -9 $pid 2>/dev/null || true
-        done
-        sleep 2
+    # 清理可能存在的冲突进程（测试模式下跳过）
+    if [ "${TESTING_MODE:-}" != "true" ]; then
+        local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+        if [ -n "$existing_pids" ]; then
+            print_message $YELLOW "💥 清理冲突进程: $existing_pids"
+            echo "$existing_pids" | while read -r pid; do
+                kill -9 $pid 2>/dev/null || true
+            done
+            sleep 2
+        fi
+    else
+        print_message $BLUE "🧪 测试模式：跳过进程清理"
     fi
     
     # 启动机器人
@@ -959,10 +963,116 @@ EOF
 }
 
 # ==========================================
+# 安全的机器人测试函数（绝对不触发kill命令）
+# ==========================================
+
+safe_test_bot_function() {
+    print_message $BLUE "🧪 测试机器人功能..."
+    
+    # 查找项目目录，但不改变当前目录
+    local project_dir=""
+    for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
+        if [ -d "$dir" ] && [ -f "$dir/.env" ]; then
+            project_dir="$dir"
+            break
+        fi
+    done
+    
+    if [ -z "$project_dir" ]; then
+        print_message $RED "❌ 配置文件不存在"
+        print_message $YELLOW "💡 请先完成机器人配置"
+        read -p "按回车键继续..." -r
+        return
+    fi
+    
+    # 安全地读取.env文件，避免执行其中的命令
+    local BOT_TOKEN=""
+    local CHAT_ID=""
+    
+    if [ -f "$project_dir/.env" ]; then
+        # 使用grep而不是source来读取环境变量，避免执行任何命令
+        BOT_TOKEN=$(grep "^BOT_TOKEN=" "$project_dir/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
+        CHAT_ID=$(grep "^CHAT_ID=" "$project_dir/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
+    fi
+    
+    if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+        print_message $RED "❌ 配置不完整"
+        print_message $YELLOW "💡 请先配置Bot Token和Chat ID"
+        read -p "按回车键继续..." -r
+        return
+    fi
+    
+    # 第一步：测试Bot Token有效性
+    print_message $YELLOW "🔄 步骤1：测试Bot Token有效性..."
+    if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
+        print_message $GREEN "✅ Bot Token有效"
+    else
+        print_message $RED "❌ Bot Token无效，请重新配置"
+        read -p "按回车键继续..." -r
+        return
+    fi
+    
+    # 第二步：发送测试消息
+    print_message $YELLOW "🔄 步骤2：发送测试消息到Telegram..."
+    print_message $CYAN "💡 重要提醒：请确保您已经与机器人进行过至少一次对话"
+    print_message $CYAN "   如果从未对话过，请先在Telegram中给机器人发送 /start"
+    
+    local test_message="🧪 **FinalUnlock 测试消息**
+
+🤖 **机器人状态**: 连接正常
+📅 **测试时间**: $(date '+%Y-%m-%d %H:%M:%S')
+🔧 **测试类型**: 功能验证
+
+✅ 如果您收到此消息，说明机器人配置正确！
+💡 您可以发送 \`/start\` 开始使用机器人功能。
+
+---
+*这是一条自动测试消息*"
+    
+    # 获取第一个Chat ID（如果有多个的话）
+    local first_chat_id=$(echo "$CHAT_ID" | cut -d',' -f1)
+    
+    # 发送测试消息（纯API调用，不涉及任何进程操作）
+    local response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d "chat_id=$first_chat_id" \
+        -d "text=$test_message" \
+        -d "parse_mode=Markdown" 2>/dev/null)
+    
+    if echo "$response" | grep -q '"ok":true'; then
+        print_message $GREEN "✅ 测试消息发送成功！"
+        print_message $CYAN "📱 请检查您的Telegram，应该收到了测试消息"
+        print_message $CYAN "💡 如果收到消息，说明机器人配置完全正确"
+    else
+        print_message $RED "❌ 测试消息发送失败"
+        print_message $YELLOW "💡 最常见原因："
+        print_message $RED "   🔴 您还没有与机器人开始过对话！"
+        print_message $YELLOW "💡 其他可能原因："
+        print_message $YELLOW "   • Chat ID不正确"
+        print_message $YELLOW "   • 网络连接问题"
+        echo
+        print_message $CYAN "🔧 解决步骤："
+        print_message $CYAN "   1. 在Telegram中搜索您的机器人用户名"
+        print_message $CYAN "   2. 点击机器人，然后点击 'START' 按钮"
+        print_message $CYAN "   3. 或者直接发送 /start 命令给机器人"
+        print_message $CYAN "   4. 然后重新运行此测试功能"
+    fi
+    
+    print_message $BLUE "🧪 测试完成"
+    print_message $CYAN "💡 此测试功能完全独立运行，不会影响任何正在运行的进程"
+    read -p "按回车键继续..." -r
+}
+
+# ==========================================
 # 🆕 第十步：最终验证和修复
 # ==========================================
 
 final_verification_and_fix() {
+    # 检查是否在测试模式下，避免干扰正在运行的bot
+    if [ "${TESTING_MODE:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 测试模式下跳过最终验证和修复"
+        return 0
+    fi
+    
     print_message $BLUE "🔍 最终验证和修复..."
     
     # 查找项目目录
@@ -1246,6 +1356,13 @@ show_completion() {
 # ==========================================
 
 show_management_menu() {
+    # 检查是否是从安装流程进入的管理菜单
+    # 如果不是，则清除可能的测试模式和自动修复标志
+    if [ "${INSTALLATION_COMPLETED:-}" != "true" ]; then
+        export TESTING_MODE=""
+        export SKIP_AUTO_FIX=""
+    fi
+    
     while true; do
         echo
         print_message $PURPLE "================================"
@@ -1446,81 +1563,8 @@ show_management_menu() {
                 fi
                 ;;
             9)
-                print_message $BLUE "🧪 测试机器人功能..."
-                if [ -n "$project_dir" ] && [ -f "$project_dir/.env" ]; then
-                    cd "$project_dir"
-                    
-                    # 安全地读取.env文件，避免执行其中的命令
-                    local BOT_TOKEN=""
-                    local CHAT_ID=""
-                    
-                    if [ -f ".env" ]; then
-                        # 使用grep而不是source来读取环境变量
-                        BOT_TOKEN=$(grep "^BOT_TOKEN=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
-                        CHAT_ID=$(grep "^CHAT_ID=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
-                    fi
-                    
-                    if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
-                        print_message $RED "❌ 配置不完整"
-                        print_message $YELLOW "💡 请先配置Bot Token和Chat ID"
-                        read -p "按回车键继续..." -r
-                        continue
-                    fi
-                    
-                    # 第一步：测试Bot Token有效性
-                    print_message $YELLOW "🔄 步骤1：测试Bot Token有效性..."
-                    if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
-                        print_message $GREEN "✅ Bot Token有效"
-                    else
-                        print_message $RED "❌ Bot Token无效，请重新配置"
-                        read -p "按回车键继续..." -r
-                        continue
-                    fi
-                    
-                    # 第二步：发送测试消息
-                    print_message $YELLOW "🔄 步骤2：发送测试消息到Telegram..."
-                    local test_message="🧪 **FinalUnlock 测试消息**
-
-🤖 **机器人状态**: 连接正常
-📅 **测试时间**: $(date '+%Y-%m-%d %H:%M:%S')
-🔧 **测试类型**: 功能验证
-
-✅ 如果您收到此消息，说明机器人配置正确！
-💡 您可以发送 \`/start\` 开始使用机器人功能。
-
----
-*这是一条自动测试消息*"
-                    
-                    # 获取第一个Chat ID（如果有多个的话）
-                    local first_chat_id=$(echo "$CHAT_ID" | cut -d',' -f1)
-                    
-                    # 发送测试消息
-                    local response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-                        -d "chat_id=$first_chat_id" \
-                        -d "text=$test_message" \
-                        -d "parse_mode=Markdown")
-                    
-                    if echo "$response" | grep -q '"ok":true'; then
-                        print_message $GREEN "✅ 测试消息发送成功！"
-                        print_message $CYAN "📱 请检查您的Telegram，应该收到了测试消息"
-                        print_message $CYAN "💡 如果收到消息，说明机器人配置完全正确"
-                    else
-                        print_message $RED "❌ 测试消息发送失败"
-                        print_message $YELLOW "💡 可能原因："
-                        print_message $YELLOW "   • Chat ID不正确"
-                        print_message $YELLOW "   • 您还没有与机器人开始对话"
-                        print_message $YELLOW "   • 网络连接问题"
-                        print_message $CYAN "🔧 建议：先在Telegram中给机器人发送 /start 命令"
-                    fi
-                    
-                    print_message $BLUE "🧪 测试完成"
-                    print_message $CYAN "💡 测试过程不会影响正在运行的机器人"
-                else
-                    print_message $RED "❌ 配置文件不存在"
-                    print_message $YELLOW "💡 请先完成机器人配置"
-                fi
-                
-                read -p "按回车键继续..." -r
+                # 调用独立的测试函数，确保不触发任何kill命令
+                safe_test_bot_function
                 ;;
             a)
                 print_message $BLUE "📊 系统服务状态:"
@@ -1729,6 +1773,12 @@ show_management_menu() {
 
 # 自动系统修复
 auto_system_fix() {
+    # 检查是否在测试模式下，避免干扰正在运行的bot
+    if [ "${TESTING_MODE:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 测试模式下跳过自动系统修复"
+        return 0
+    fi
+    
     print_message $BLUE "🔍 执行系统自动检测和修复..."
     
     # 🔧 简化：直接使用默认项目目录
@@ -2233,6 +2283,8 @@ show_main_menu() {
                 read -n 1
                 ;;
             3)
+                # 清除测试模式标志，允许自动修复执行
+                export TESTING_MODE=""
                 auto_system_fix
                 print_message $CYAN "按任意键继续..."
                 read -n 1

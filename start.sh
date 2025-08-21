@@ -2342,6 +2342,7 @@ validate_configuration() {
     if [ "$config_valid" = true ]; then
         echo
         print_message $BLUE "📤 发送实际测试消息..."
+        print_message $CYAN "💡 重要提醒：请确保您已经与机器人进行过至少一次对话"
         print_message $YELLOW "💡 请检查您的Telegram以确认收到测试消息"
         
         # 获取第一个Chat ID进行测试
@@ -2358,20 +2359,22 @@ validate_configuration() {
                 print_message $CYAN "💡 启动机器人后，所有 $admin_count 个管理员都将能够使用"
             fi
         else
-            print_message $YELLOW "⚠️ 测试消息发送失败"
-            print_message $YELLOW "💡 可能原因："
+            print_message $RED "❌ 测试消息发送失败"
+            print_message $YELLOW "💡 最常见原因："
+            print_message $RED "   🔴 您还没有与机器人开始过对话！"
+            print_message $YELLOW "💡 其他可能原因："
             print_message $CYAN "   • Chat ID 不正确"
-            print_message $CYAN "   • 您需要先向机器人发送 /start 命令"
             print_message $CYAN "   • 网络连接问题"
             print_message $CYAN "   • Bot Token 权限不足"
             echo "$(date '+%Y-%m-%d %H:%M:%S'): Test message failed to $first_chat_id" >> "$validation_log"
             
             # 提供解决建议
             echo
-            print_message $BLUE "🔧 建议解决步骤："
-            print_message $CYAN "1. 在Telegram中搜索您的机器人"
-            print_message $CYAN "2. 点击 'START' 或发送 /start 命令"
-            print_message $CYAN "3. 然后重新运行验证测试"
+            print_message $BLUE "🔧 解决步骤："
+            print_message $CYAN "1. 在Telegram中搜索您的机器人用户名"
+            print_message $CYAN "2. 点击机器人，然后点击 'START' 按钮"
+            print_message $CYAN "3. 或者直接发送 /start 命令给机器人"
+            print_message $CYAN "4. 然后重新运行此配置验证"
         fi
         echo
     fi
