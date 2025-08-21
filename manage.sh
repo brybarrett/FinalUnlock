@@ -28,8 +28,7 @@ info() { msg "$1" "$BLUE"; }
 # Ctrl+C处理函数
 handle_ctrl_c() {
     echo ""
-    warn "⚠️ 请使用菜单选项 [0] 正常退出程序"
-    echo -n "请选择操作 [0-8]: "
+    warn "⚠️ Ctrl+C已被屏蔽！请按任意键返回主菜单或使用菜单选项 [0] 退出程序"
 }
 
 # 检查权限
@@ -512,14 +511,17 @@ show_logs() {
     clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
         info "📋 实时日志监控"
-        msg "提示：按任意键返回主菜单"
+        msg "提示：按任意键返回主菜单 (Ctrl+C已屏蔽)"
         echo "================================"
+        
+        # 确保Ctrl+C被屏蔽，即使在日志页面也不能退出
+        trap 'handle_ctrl_c' SIGINT
         
         # 在后台启动tail，获取其PID
         tail -f "$INSTALL_DIR/bot.log" &
         local tail_pid=$!
         
-        # 等待用户按任意键
+        # 等待用户按任意键（非Ctrl+C）
         read -n 1 -s -p ""
         
         # 杀死tail进程
