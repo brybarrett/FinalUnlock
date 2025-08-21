@@ -834,14 +834,31 @@ unified_start_bot() {
     
 
     
-    # 清理可能存在的冲突进程
+    # 🔧 智能启动逻辑：先检查是否已有机器人在运行
     local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
     if [ -n "$existing_pids" ]; then
-        print_message $YELLOW "💥 清理冲突进程: $existing_pids"
-        echo "$existing_pids" | while read -r pid; do
-            kill -9 $pid 2>/dev/null || true
-        done
-        sleep 2
+        print_message $GREEN "✅ 检测到机器人已在运行 (PID: $existing_pids)"
+        
+        # 验证并更新PID文件
+        local first_pid=$(echo "$existing_pids" | head -1)
+        echo "$first_pid" > "$pid_file"
+        
+        print_message $CYAN "💡 机器人已在后台运行，无需重复启动"
+        
+        # 释放启动锁
+        rm -f "$startup_lock"
+        return 0
+    fi
+    
+    # 如果没有运行的bot，则启动新进程
+    print_message $YELLOW "🔄 正在启动新的机器人实例..."
+    
+    # 清理可能存在的无效PID文件
+    if [ -f "$pid_file" ]; then
+        local old_pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$old_pid" ] && ! ps -p $old_pid > /dev/null 2>&1; then
+            rm -f "$pid_file"
+        fi
     fi
     
     # 启动机器人
@@ -1019,10 +1036,10 @@ final_verification_and_fix() {
             fi
             
             if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
-                print_message $GREEN "✅ bot.py重启成功"
+                print_message $GREEN "✅ bot.py智能启动成功"
                 issues_fixed=$((issues_fixed + 1))
             else
-                print_message $RED "❌ bot.py重启失败，请检查日志: cat bot.log"
+                print_message $RED "❌ bot.py启动失败，请检查日志: cat bot.log"
             fi
         fi
     else
@@ -1046,7 +1063,7 @@ final_verification_and_fix() {
             fi
             
             if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
-                print_message $GREEN "✅ 新bot进程启动成功"
+                print_message $GREEN "✅ 新bot进程智能启动成功"
                 issues_fixed=$((issues_fixed + 1))
             else
                 print_message $RED "❌ 新bot进程启动失败"
@@ -1742,47 +1759,18 @@ auto_system_fix() {
                     need_start=1
                 fi
             fi
-            if [ $need_start -eq 1 ]; then
-                print_message $YELLOW "🔄 机器人未运行，正在自动强制重启..."
+            # 🔧 关键修复：使用智能启动，不强制重启已运行的机器人
+            local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+            if [ -n "$running_bots" ]; then
+                print_message $GREEN "✅ 检测到机器人已在运行 (PID: $running_bots)"
+                # 同步PID文件
+                local first_pid=$(echo "$running_bots" | head -1)
+                echo "$first_pid" > "$pid_file"
+                print_message $GREEN "✅ 机器人运行正常，无需重启"
+            else
+                print_message $YELLOW "🔄 机器人未运行，正在智能启动..."
                 
-                # 🔧 使用强制重启逻辑，彻底清理现有进程
-                # 方法1：通过PID文件停止
-                if [ -f "$pid_file" ]; then
-                    local old_pid=$(cat "$pid_file" 2>/dev/null)
-                    if [ -n "$old_pid" ] && ps -p $old_pid > /dev/null 2>&1; then
-                        kill $old_pid 2>/dev/null || true
-                        sleep 3
-                        if ps -p $old_pid > /dev/null 2>&1; then
-                            kill -9 $old_pid 2>/dev/null || true
-                        fi
-                    fi
-                fi
-                
-                # 方法2：停止所有bot.py进程
-                local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-                if [ -n "$bot_pids" ]; then
-                    echo "$bot_pids" | while read -r pid; do
-                        if [ -n "$pid" ]; then
-                            kill $pid 2>/dev/null || true
-                        fi
-                    done
-                    sleep 3
-                    
-                    # 强制停止残留进程
-                    bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-                    if [ -n "$bot_pids" ]; then
-                        echo "$bot_pids" | while read -r pid; do
-                            if [ -n "$pid" ]; then
-                                kill -9 $pid 2>/dev/null || true
-                            fi
-                        done
-                    fi
-                fi
-                
-                # 方法3：pkill清理
-                pkill -f "bot.py" 2>/dev/null || true
-                
-                # 清理PID文件
+                # 清理可能存在的无效PID文件
                 rm -f "$pid_file"
                 
                 # 启动新的机器人进程
@@ -1795,9 +1783,9 @@ auto_system_fix() {
                     fi
                     
                     if unified_start_bot "$python_cmd" "$log_file" "$pid_file"; then
-                        print_message $GREEN "✅ 机器人自动强制重启成功"
+                        print_message $GREEN "✅ 机器人智能启动成功"
                     else
-                        print_message $RED "❌ 机器人自动启动失败"
+                        print_message $RED "❌ 机器人启动失败"
                     fi
                 fi
             else
