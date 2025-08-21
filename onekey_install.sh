@@ -2083,10 +2083,20 @@ main() {
     show_completion
     
     # 🆕 第九步：自动系统修复和验证
-    auto_system_fix
+    # 🔒 强制检查是否在API测试模式下
+    if [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        auto_system_fix
+    else
+        print_message $YELLOW "🔒 检测到API测试正在进行，跳过自动系统修复"
+    fi
     
     # 🆕 第十步：最终验证和修复
-    final_verification_and_fix
+    # 🔒 强制检查是否在API测试模式下
+    if [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        final_verification_and_fix
+    else
+        print_message $YELLOW "🔒 检测到API测试正在进行，跳过最终验证和修复"
+    fi
     
     # 🆕 第十一步：显示管理菜单（不自动退出）
     show_management_menu
@@ -2379,9 +2389,20 @@ show_main_menu() {
                 read -n 1
                 ;;
             3)
-                # 清除测试模式标志，允许自动修复执行
-                export TESTING_MODE=""
-                auto_system_fix
+                # 🔒 强制检查是否在API测试模式下
+                if [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
+                    print_message $YELLOW "🔒 检测到API测试正在进行，禁止系统修复"
+                    print_message $CYAN "请等待测试完成后再执行系统修复"
+                else
+                    # 只有在非测试模式下才清除标志
+                    export TESTING_MODE=""
+                    # 🔒 强制检查是否在API测试模式下
+    if [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        auto_system_fix
+    else
+        print_message $YELLOW "🔒 检测到API测试正在进行，跳过自动系统修复"
+    fi
+                fi
                 print_message $CYAN "按任意键继续..."
                 read -n 1
                 ;;
@@ -2513,10 +2534,20 @@ main_install() {
     show_completion
     
     # 🆕 第九步：自动系统修复和验证
-    auto_system_fix
+    # 🔒 强制检查是否在API测试模式下
+    if [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        auto_system_fix
+    else
+        print_message $YELLOW "🔒 检测到API测试正在进行，跳过自动系统修复"
+    fi
     
     # 🆕 第十步：最终验证和修复
-    final_verification_and_fix
+    # 🔒 强制检查是否在API测试模式下
+    if [ "${FORCE_API_ONLY_TEST:-}" != "true" ] && [ ! -f "/tmp/finalunlock_test_api_only.lock" ]; then
+        final_verification_and_fix
+    else
+        print_message $YELLOW "🔒 检测到API测试正在进行，跳过最终验证和修复"
+    fi
     
     # 🆕 第十一步：显示管理菜单（不自动退出）
     show_management_menu
