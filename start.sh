@@ -1398,12 +1398,14 @@ check_bot_status() {
 
 # 🎯 智能启动机器人（不强制重启已运行的实例）
 start_bot() {
-    return $(start_bot_with_mode "smart")
+    start_bot_with_mode "smart"
+    return $?
 }
 
 # 🔄 强制启动机器人（会重启已运行的实例）
 force_start_bot() {
-    return $(start_bot_with_mode "force")
+    start_bot_with_mode "force"
+    return $?
 }
 
 # 🔧 核心启动函数，支持不同模式

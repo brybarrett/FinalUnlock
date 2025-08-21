@@ -1359,15 +1359,15 @@ show_management_menu() {
             1)
                 if [ -n "$project_dir" ]; then
                     cd "$project_dir"
-                    if [ -f "bot.pid" ]; then
-                        local old_pid=$(cat bot.pid)
-                        if ps -p $old_pid > /dev/null 2>&1; then
-                            print_message $YELLOW "🔄 停止现有进程..."
-                            kill $old_pid 2>/dev/null
-                            sleep 2
-                        fi
+                    # 🔧 使用智能启动，不强制重启已运行的机器人
+                    local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+                    if [ -n "$running_bots" ]; then
+                        print_message $GREEN "✅ 检测到机器人已在运行 (PID: $running_bots)"
+                        print_message $CYAN "💡 机器人已在后台运行，无需重复启动"
+                    else
+                        print_message $YELLOW "🔄 机器人未运行，正在启动..."
+                        auto_start_bot
                     fi
-                    auto_start_bot
                 else
                     print_message $RED "❌ 未找到项目目录"
                 fi
