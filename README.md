@@ -56,7 +56,7 @@ fn-bot
 cd /path/to/FinalUnlock
 ./start.sh
 ```
-
+更新说明：项目安装成功后再次运行一键命令即可看到.
 ---
 
 ## 🌟 功能特性
@@ -596,5 +596,6 @@ df -h
 [⬆️ 回到顶部](#-finalshell-激活码-telegram-机器人)
 
 </div>
+
 
 
