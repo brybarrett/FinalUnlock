@@ -1,6 +1,6 @@
 # 🚀 FinalUnlock - FinalShell激活码生成机器人
 
-
+> 一键安装，无限使用，稳定运行的Telegram机器人
 
 ## 📋 项目简介
 
@@ -42,26 +42,41 @@ git clone https://github.com/xymn2023/FinalUnlock.git
 
 2.进入目录
 
+
+
 ```
 cd FinalUnlock
 ```
 
 
 
+3.创建配置文件
+
+
+
 ```bash
-# 3. 创建配置文件
 cat > .env << 'EOF'
 BOT_TOKEN=你的机器人Token
 CHAT_ID=你的ChatID
 EOF
+```
 
-# 4. 一键安装
+
+
+4.一键安装
+
+
+
+```
 sudo bash install.sh
 ```
+
+
 
 ### 获取Token和Chat ID
 
 **Bot Token:**
+
 1. Telegram搜索 @BotFather
 2. 发送 `/newbot` 创建机器人
 3. 复制返回的Token
@@ -157,6 +172,5 @@ MIT License - 自由使用，修改和分发
 - 作者不承担任何法律责任
 
 ---
-
 
 **🎉 享受简单高效的FinalShell激活码生成体验！**
