@@ -511,7 +511,7 @@ show_logs() {
     clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
         info "📋 实时日志监控"
-        msg "提示：按任意键返回主菜单 (Ctrl+C已屏蔽)"
+        msg "🔥 按任意键返回主菜单 (Ctrl+C已屏蔽) 🔥" "$YELLOW"
         echo "================================"
         
         # 确保Ctrl+C被屏蔽，即使在日志页面也不能退出
@@ -522,7 +522,8 @@ show_logs() {
         local tail_pid=$!
         
         # 等待用户按任意键（非Ctrl+C）
-        read -n 1 -s -p ""
+        echo ""
+        read -n 1 -s -p ">>> 按任意键返回主菜单 <<<"
         
         # 杀死tail进程
         kill $tail_pid 2>/dev/null || true
