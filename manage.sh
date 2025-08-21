@@ -440,8 +440,23 @@ start_service() {
         show_status
     else
         error "❌ 机器人启动失败"
-        msg "查看详细日志: journalctl -u $SERVICE_NAME -f"
-        systemctl status $SERVICE_NAME --no-pager -l
+        msg ""
+        msg "🔍 错误诊断："
+        
+        # 检查日志文件
+        if [[ -f "$INSTALL_DIR/bot.log" ]]; then
+            msg "📋 最新错误日志："
+            tail -10 "$INSTALL_DIR/bot.log" | while IFS= read -r line; do
+                echo "  $line"
+            done
+        fi
+        
+        msg ""
+        msg "🛠️ 解决方案："
+        msg "1. 查看完整日志: fn-bot logs"
+        msg "2. 检查配置文件: cat /usr/local/FinalUnlock/.env"
+        msg "3. 手动测试: cd /usr/local/FinalUnlock && source venv/bin/activate && python bot.py"
+        msg "4. 查看系统日志: journalctl -u $SERVICE_NAME -f"
     fi
 }
 
@@ -622,25 +637,36 @@ update_code() {
     info "更新代码..."
     cd "$INSTALL_DIR"
     
-    # 备份配置
+    # 备份配置和当前代码
     cp .env .env.backup 2>/dev/null || true
+    cp bot.py bot.py.backup 2>/dev/null || true
     
     # 尝试从GitHub下载最新代码
-    if curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/bot.py > bot.py.new 2>/dev/null; then
+    if curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/bot.py > bot.py.new 2>/dev/null && [[ -s bot.py.new ]]; then
         # 下载成功，替换文件
         curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/py.py > py.py.new
         curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/requirements.txt > requirements.txt.new
         curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/manage.sh > manage.sh.new
         
-        mv bot.py.new bot.py
-        mv py.py.new py.py
-        mv requirements.txt.new requirements.txt
-        mv manage.sh.new manage.sh
-        chmod +x manage.sh
-        
-        msg "✅ 代码更新成功"
+        # 检查下载的文件是否有效
+        if [[ -s bot.py.new ]] && [[ -s py.py.new ]] && [[ -s requirements.txt.new ]]; then
+            mv bot.py.new bot.py
+            mv py.py.new py.py
+            mv requirements.txt.new requirements.txt
+            
+            if [[ -s manage.sh.new ]]; then
+                mv manage.sh.new manage.sh
+                chmod +x manage.sh
+            fi
+            
+            msg "✅ 代码更新成功"
+        else
+            warn "⚠️ 下载的文件无效，恢复备份"
+            rm -f *.new 2>/dev/null || true
+            cp bot.py.backup bot.py 2>/dev/null || true
+        fi
     else
-        warn "⚠️ 无法连接到GitHub，跳过更新"
+        warn "⚠️ 无法连接到GitHub或下载失败"
         rm -f *.new 2>/dev/null || true
     fi
     
@@ -648,8 +674,12 @@ update_code() {
     cp .env.backup .env 2>/dev/null || true
     
     # 更新依赖
-    source venv/bin/activate
-    pip install -r requirements.txt -q
+    if [[ -f venv/bin/activate ]]; then
+        source venv/bin/activate
+        pip install -r requirements.txt -q
+    else
+        warn "⚠️ 虚拟环境不存在，跳过依赖更新"
+    fi
     
     # 重启服务
     restart_service

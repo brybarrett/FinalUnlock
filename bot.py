@@ -2,7 +2,7 @@
 """
 FinalUnlock Telegram Bot 
 功能：FinalShell激活码自动生成机器人
-
+"""
 
 import os
 import sys
@@ -283,11 +283,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 # PID管理
 def create_pid():
     try:
+        # 确保目录存在
+        PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 写入当前进程PID
         with open(PID_FILE, 'w') as f:
             f.write(str(os.getpid()))
-        logger.info(f"PID文件已创建: {PID_FILE}")
+        
+        logger.info(f"PID文件已创建: {PID_FILE} (PID: {os.getpid()})")
     except Exception as e:
         logger.error(f"创建PID文件失败: {e}")
+        # PID文件创建失败不应该阻止程序运行
 
 def remove_pid():
     try:
@@ -301,8 +307,9 @@ def remove_pid():
 def main():
     logger.info("FinalUnlock Bot 启动中...")
     
-    # 创建PID文件
+    # 立即创建PID文件
     create_pid()
+    logger.info("PID文件已创建")
     
     try:
         # 创建应用
