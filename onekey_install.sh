@@ -64,15 +64,8 @@ print_message() {
     echo -e "${color}${message}${NC}"
 }
 
-# 显示欢迎信息
+# 清屏准备
 clear
-echo -e "${PURPLE}================================${NC}"
-echo -e "${PURPLE}  FinalShell 激活码机器人一键安装${NC}"
-echo -e "${PURPLE}     完美版本 v7.0${NC}"
-echo -e "${PURPLE}================================${NC}"
-echo -e "${CYAN}项目地址: https://github.com/xymn2023/FinalUnlock${NC}"
-echo -e "${CYAN}静默安装 + 自动清理 + 智能配置 + 自动启动${NC}"
-echo
 
 # ==========================================
 # 第一步：预检查和清理
