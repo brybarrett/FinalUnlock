@@ -969,6 +969,11 @@ EOF
 safe_test_bot_function() {
     print_message $BLUE "🧪 测试机器人功能..."
     
+    # 设置严格的测试模式环境变量，防止任何进程清理
+    export TESTING_MODE="true"
+    export SKIP_AUTO_FIX="true"
+    export NO_PROCESS_CLEANUP="true"
+    
     # 查找项目目录，但不改变当前目录
     local project_dir=""
     for dir in "/usr/local/FinalUnlock" "$HOME/FinalUnlock" "/root/FinalUnlock"; do
@@ -1059,6 +1064,12 @@ safe_test_bot_function() {
     
     print_message $BLUE "🧪 测试完成"
     print_message $CYAN "💡 此测试功能完全独立运行，不会影响任何正在运行的进程"
+    
+    # 清除测试模式环境变量
+    export TESTING_MODE=""
+    export SKIP_AUTO_FIX=""
+    export NO_PROCESS_CLEANUP=""
+    
     read -p "按回车键继续..." -r
 }
 
