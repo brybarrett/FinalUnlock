@@ -1749,16 +1749,7 @@ auto_system_fix() {
         
         # 自动修复2：检查机器人进程
         local pid_file="$project_dir/bot.pid"
-        local need_start=0
         if [ -f "$project_dir/.env" ]; then
-            if [ ! -f "$pid_file" ]; then
-                need_start=1
-            else
-                local pid=$(cat "$pid_file" 2>/dev/null)
-                if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
-                    need_start=1
-                fi
-            fi
             # 🔧 关键修复：使用智能启动，不强制重启已运行的机器人
             local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
             if [ -n "$running_bots" ]; then
