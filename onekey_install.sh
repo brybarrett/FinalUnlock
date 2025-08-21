@@ -1446,22 +1446,81 @@ show_management_menu() {
                 fi
                 ;;
             9)
+                print_message $BLUE "🧪 测试机器人功能..."
                 if [ -n "$project_dir" ] && [ -f "$project_dir/.env" ]; then
                     cd "$project_dir"
-                    source .env
-                    if [ -n "$BOT_TOKEN" ]; then
-                        print_message $YELLOW "🔄 测试Bot Token..."
-                        if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
-                            print_message $GREEN "✅ Bot Token有效"
-                        else
-                            print_message $RED "❌ Bot Token无效"
-                        fi
-                    else
-                        print_message $RED "❌ 未配置Bot Token"
+                    
+                    # 安全地读取.env文件，避免执行其中的命令
+                    local BOT_TOKEN=""
+                    local CHAT_ID=""
+                    
+                    if [ -f ".env" ]; then
+                        # 使用grep而不是source来读取环境变量
+                        BOT_TOKEN=$(grep "^BOT_TOKEN=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
+                        CHAT_ID=$(grep "^CHAT_ID=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
                     fi
+                    
+                    if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+                        print_message $RED "❌ 配置不完整"
+                        print_message $YELLOW "💡 请先配置Bot Token和Chat ID"
+                        read -p "按回车键继续..." -r
+                        continue
+                    fi
+                    
+                    # 第一步：测试Bot Token有效性
+                    print_message $YELLOW "🔄 步骤1：测试Bot Token有效性..."
+                    if curl -s "https://api.telegram.org/bot$BOT_TOKEN/getMe" | grep -q '"ok":true'; then
+                        print_message $GREEN "✅ Bot Token有效"
+                    else
+                        print_message $RED "❌ Bot Token无效，请重新配置"
+                        read -p "按回车键继续..." -r
+                        continue
+                    fi
+                    
+                    # 第二步：发送测试消息
+                    print_message $YELLOW "🔄 步骤2：发送测试消息到Telegram..."
+                    local test_message="🧪 **FinalUnlock 测试消息**
+
+🤖 **机器人状态**: 连接正常
+📅 **测试时间**: $(date '+%Y-%m-%d %H:%M:%S')
+🔧 **测试类型**: 功能验证
+
+✅ 如果您收到此消息，说明机器人配置正确！
+💡 您可以发送 \`/start\` 开始使用机器人功能。
+
+---
+*这是一条自动测试消息*"
+                    
+                    # 获取第一个Chat ID（如果有多个的话）
+                    local first_chat_id=$(echo "$CHAT_ID" | cut -d',' -f1)
+                    
+                    # 发送测试消息
+                    local response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                        -d "chat_id=$first_chat_id" \
+                        -d "text=$test_message" \
+                        -d "parse_mode=Markdown")
+                    
+                    if echo "$response" | grep -q '"ok":true'; then
+                        print_message $GREEN "✅ 测试消息发送成功！"
+                        print_message $CYAN "📱 请检查您的Telegram，应该收到了测试消息"
+                        print_message $CYAN "💡 如果收到消息，说明机器人配置完全正确"
+                    else
+                        print_message $RED "❌ 测试消息发送失败"
+                        print_message $YELLOW "💡 可能原因："
+                        print_message $YELLOW "   • Chat ID不正确"
+                        print_message $YELLOW "   • 您还没有与机器人开始对话"
+                        print_message $YELLOW "   • 网络连接问题"
+                        print_message $CYAN "🔧 建议：先在Telegram中给机器人发送 /start 命令"
+                    fi
+                    
+                    print_message $BLUE "🧪 测试完成"
+                    print_message $CYAN "💡 测试过程不会影响正在运行的机器人"
                 else
                     print_message $RED "❌ 配置文件不存在"
+                    print_message $YELLOW "💡 请先完成机器人配置"
                 fi
+                
+                read -p "按回车键继续..." -r
                 ;;
             a)
                 print_message $BLUE "📊 系统服务状态:"
