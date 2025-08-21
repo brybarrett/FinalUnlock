@@ -561,9 +561,9 @@ uninstall_bot_with_cleanup() {
     echo
     print_message $YELLOW "⚠️ 是否删除整个项目目录?"
     print_message $RED "警告：这将删除所有项目文件，包括脚本和虚拟环境"
-    read -p "确认删除项目目录? (输入 'DELETE' 确认): " confirm
+    read -p "确认删除项目目录? (输入 'yes' 确认): " confirm
     
-    if [ "$confirm" = "DELETE" ]; then
+    if [ "$confirm" = "yes" ]; then
         print_message $RED "🗑️ 删除项目目录..."
         cd ..
         rm -rf "$PROJECT_DIR"
