@@ -616,27 +616,77 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 主程序
 # 修复第600-610行的run_polling调用
 def cleanup_existing_instances():
-    """清理可能存在的其他机器人实例"""
+    """清理可能存在的其他机器人实例 - 严格的先结束后启动逻辑"""
+    logger.info("🧹 开始彻底清理其他机器人实例...")
+    
+    # 创建清理锁文件，防止其他脚本干涉
+    lock_file = "/tmp/finalunlock_cleanup.lock"
+    try:
+        with open(lock_file, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info("🔒 已获取清理锁，防止其他脚本干涉")
+    except:
+        pass
+    
     try:
         import psutil
+        import time
         
         current_pid = os.getpid()
-        current_script = os.path.abspath(__file__)
         
-        # 查找所有运行bot.py的进程
+        # 第一阶段：发现所有需要清理的进程
+        target_pids = []
+        logger.info("🔍 第一阶段：扫描所有bot.py进程...")
+        
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 if proc.info['pid'] == current_pid:
                     continue
                     
                 cmdline = ' '.join(proc.info['cmdline'] or [])
-                if 'bot.py' in cmdline and current_script in cmdline:
-                    logger.warning(f"发现其他bot实例 (PID: {proc.info['pid']})，正在强制终止...")
-                    proc.kill()  # 直接使用kill()强制终止
-                    logger.info(f"已强制终止重复实例 (PID: {proc.info['pid']})")
+                if 'bot.py' in cmdline:
+                    target_pids.append(proc.info['pid'])
+                    logger.warning(f"🎯 发现目标进程 PID: {proc.info['pid']}")
                         
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
+        
+        # 第二阶段：强制终止所有目标进程
+        if target_pids:
+            logger.info(f"💥 第二阶段：强制终止 {len(target_pids)} 个进程...")
+            for pid in target_pids:
+                try:
+                    proc = psutil.Process(pid)
+                    proc.kill()  # 使用kill -9强制终止
+                    logger.info(f"✅ 已发送KILL信号给进程 PID: {pid}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    logger.info(f"⚠️ 进程 PID: {pid} 已不存在或无权限")
+            
+            # 第三阶段：等待并验证所有进程完全退出
+            logger.info("⏳ 第三阶段：等待进程完全退出...")
+            max_wait = 10  # 最多等待10秒
+            for wait_time in range(max_wait):
+                remaining_pids = []
+                for pid in target_pids:
+                    try:
+                        if psutil.pid_exists(pid):
+                            remaining_pids.append(pid)
+                    except:
+                        pass
+                
+                if not remaining_pids:
+                    logger.info(f"✅ 所有目标进程已完全退出 (耗时: {wait_time + 1}秒)")
+                    break
+                    
+                if wait_time < max_wait - 1:
+                    logger.info(f"⏳ 仍有 {len(remaining_pids)} 个进程未退出，继续等待... ({wait_time + 1}/{max_wait})")
+                    time.sleep(1)
+                else:
+                    logger.warning(f"⚠️ 仍有 {len(remaining_pids)} 个进程未完全退出: {remaining_pids}")
+            
+            logger.info("🎯 清理阶段完成，确保所有冲突进程已终止")
+        else:
+            logger.info("✅ 未发现其他bot实例")
                 
     except ImportError:
         logger.info("psutil 模块未安装，尝试自动安装...")
@@ -706,14 +756,51 @@ def cleanup_existing_instances():
         
     except Exception as e:
         logger.warning(f"清理其他实例时出错: {e}")
+    finally:
+        # 释放清理锁
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+                logger.info("🔓 已释放清理锁")
+        except:
+            pass
 
 if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
         
-        # 清理可能存在的其他实例
+        # 阶段1：彻底清理所有冲突实例（原子化操作）
+        logger.info("🚀 阶段1：执行彻底清理...")
         cleanup_existing_instances()
         
+        # 阶段2：确保清理完成后再继续
+        logger.info("🔍 阶段2：验证清理结果...")
+        import time
+        time.sleep(3)  # 增加等待时间确保完全退出
+        
+        # 最终验证：确保没有残留进程
+        try:
+            import psutil
+            remaining_bots = []
+            for proc in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'bot.py' in cmdline and proc.info['pid'] != os.getpid():
+                        remaining_bots.append(proc.info['pid'])
+                except:
+                    continue
+            
+            if remaining_bots:
+                logger.error(f"❌ 发现残留bot进程: {remaining_bots}")
+                logger.error("❌ 启动中止，请手动清理后重试")
+                sys.exit(1)
+            else:
+                logger.info("✅ 验证通过：无残留进程")
+        except ImportError:
+            logger.info("⚠️ 无法验证残留进程，继续启动...")
+        
+        # 阶段3：开始初始化新的机器人实例
+        logger.info("🤖 阶段3：开始初始化机器人...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         
         # 创建PID文件
@@ -749,38 +836,51 @@ if __name__ == '__main__':
         logger.info('机器人启动成功，开始轮询...')
         print('Bot 运行中...')
         
-        # 🔧 修复：使用兼容v20.0+的参数，增加冲突处理
-        try:
-            app.run_polling(
-                drop_pending_updates=True,
-                timeout=30,
-                bootstrap_retries=3,
-                close_loop=False  # 避免事件循环冲突
-            )
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "terminated by other getupdates" in error_msg or "conflict" in error_msg:
-                logger.warning("检测到多实例冲突，尝试自动修复...")
-                
-                # 等待一下让其他实例退出
-                import time
-                time.sleep(5)
-                
-                # 尝试再次清理
-                cleanup_existing_instances()
-                
-                # 再次尝试启动
-                logger.info("重新尝试启动机器人...")
-                time.sleep(2)
+        # 🔧 修复：使用兼容v20.0+的参数，增强冲突处理
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                if attempt > 0:
+                    logger.info(f"第 {attempt + 1} 次尝试启动机器人...")
+                    # 每次重试前都强制清理
+                    cleanup_existing_instances()
+                    time.sleep(3)
                 
                 app.run_polling(
                     drop_pending_updates=True,
                     timeout=30,
                     bootstrap_retries=3,
-                    close_loop=False
+                    close_loop=False  # 避免事件循环冲突
                 )
-            else:
-                raise  # 如果不是冲突错误，重新抛出异常
+                break  # 启动成功，跳出循环
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "terminated by other getupdates" in error_msg or "conflict" in error_msg:
+                    logger.error(f"🚨 检测到Telegram Bot多实例冲突 (尝试 {attempt + 1}/{max_attempts})")
+                    logger.error(f"错误详情: {e}")
+                    
+                    if attempt < max_attempts - 1:
+                        logger.info("🔧 正在执行强制清理...")
+                        
+                        # 立即强制清理
+                        cleanup_existing_instances()
+                        
+                        # 增加等待时间确保Telegram API状态重置
+                        logger.info("⏳ 等待Telegram API状态重置...")
+                        time.sleep(8)  # 增加等待时间
+                        
+                        logger.info(f"🔄 准备第 {attempt + 2} 次启动尝试...")
+                    else:
+                        logger.error("❌ 多次重试后仍然冲突！")
+                        logger.error("💡 建议手动运行以下命令进行彻底清理:")
+                        logger.error("   bash fix_conflict.sh")
+                        logger.error("   或者重启系统后再试")
+                        raise
+                else:
+                    # 非冲突错误，直接抛出
+                    logger.error(f"机器人启动出错: {e}")
+                    raise
         
     except KeyboardInterrupt:
         logger.info("收到键盘中断，正在关闭...")

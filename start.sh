@@ -48,41 +48,76 @@ execute_manual_cleanup() {
 
 # 内置清理逻辑（共用）
 internal_cleanup_logic() {
-    print_message $YELLOW "🔍 扫描所有bot进程..."
+    print_message $BLUE "🔍 开始原子化清理流程..."
+    
+    # 创建清理锁，防止其他脚本干涉
+    local cleanup_lock="/tmp/finalunlock_internal_cleanup.lock"
+    echo $$ > "$cleanup_lock"
     
     # 获取当前脚本PID
     local current_pid=$$
     
-    # 查找所有相关进程
+    # 阶段1：发现所有需要清理的进程
+    print_message $BLUE "🔍 阶段1：扫描所有相关进程..."
     local all_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
     local finalunlock_pids=$(pgrep -f "FinalUnlock" 2>/dev/null || true)
     local combined_pids="$all_pids $finalunlock_pids"
     
-    # 去重
-    local unique_pids=$(echo "$combined_pids" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+$' || true)
+    # 去重并过滤当前PID
+    local unique_pids=$(echo "$combined_pids" | tr ' ' '\n' | sort -u | grep -E '^[0-9]+$' | grep -v "^$current_pid\$" || true)
     
-    if [ -z "$unique_pids" ]; then
-        print_message $GREEN "✅ 未发现运行中的bot进程"
-        return 0
+    # 阶段2：强制终止所有目标进程
+    if [ -n "$unique_pids" ]; then
+        local process_count=$(echo "$unique_pids" | wc -w)
+        print_message $YELLOW "💥 阶段2：强制终止 $process_count 个进程..."
+        
+        echo "$unique_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                local process_info=$(ps -p $pid -o pid,cmd --no-headers 2>/dev/null || echo "$pid [进程信息获取失败]")
+                print_message $CYAN "   目标进程: $process_info"
+            fi
+        done
+        
+        # 发送KILL -9信号
+        echo "$unique_pids" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                print_message $CYAN "   💥 发送KILL信号给 PID: $pid"
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
+        
+        # 阶段3：等待并验证进程完全退出
+        print_message $BLUE "⏳ 阶段3：等待进程完全退出..."
+        local max_wait=8
+        local wait_time=0
+        
+        while [ $wait_time -lt $max_wait ]; do
+            local remaining_pids=$(pgrep -f "python.*bot\.py|FinalUnlock" 2>/dev/null | grep -v "^$current_pid\$" || true)
+            
+            if [ -z "$remaining_pids" ]; then
+                print_message $GREEN "✅ 所有目标进程已完全退出 (耗时: $((wait_time + 1))秒)"
+                break
+            fi
+            
+            if [ $wait_time -lt $((max_wait - 1)) ]; then
+                local remaining_count=$(echo "$remaining_pids" | wc -w)
+                print_message $YELLOW "⏳ 仍有 $remaining_count 个进程未退出，继续等待... ($((wait_time + 1))/$max_wait)"
+                sleep 1
+                wait_time=$((wait_time + 1))
+            else
+                print_message $RED "⚠️ 超时！仍有进程未完全退出，进行最后清理..."
+                echo "$remaining_pids" | while read -r rpid; do
+                    kill -9 $rpid 2>/dev/null || true
+                done
+                sleep 1
+                break
+            fi
+        done
+        
+        print_message $GREEN "🎯 清理阶段完成"
+    else
+        print_message $GREEN "✅ 未发现需要清理的进程"
     fi
-    
-    print_message $YELLOW "🎯 发现以下进程："
-    echo "$unique_pids" | while read -r pid; do
-        if [ -n "$pid" ] && [ "$pid" != "$current_pid" ]; then
-            local process_info=$(ps -p $pid -o pid,cmd --no-headers 2>/dev/null || echo "$pid [进程信息获取失败]")
-            print_message $CYAN "   $process_info"
-        fi
-    done
-    
-    echo
-    print_message $BLUE "💥 发送KILL -9信号强制终止..."
-    echo "$unique_pids" | while read -r pid; do
-        if [ -n "$pid" ] && [ "$pid" != "$current_pid" ]; then
-            kill -9 $pid 2>/dev/null || true
-        fi
-    done
-    
-    sleep 1
     
     # 清理PID文件
     print_message $BLUE "🧹 清理相关文件..."
@@ -94,7 +129,10 @@ internal_cleanup_logic() {
         systemctl stop finalunlock 2>/dev/null || true
     fi
     
-    print_message $GREEN "✅ 清理完成"
+    # 释放清理锁
+    rm -f "$cleanup_lock"
+    
+    print_message $GREEN "✅ 原子化清理完成"
 }
 
 # 启动前自动清理函数（静默模式）
@@ -152,19 +190,93 @@ start_or_restart_bot() {
     # 创建日志目录（如果不存在）
     mkdir -p "$(dirname "$LOG_FILE")"
     
-    # 启动前最后检查是否有冲突进程
-    local conflicting_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
-    if [ -n "$conflicting_pids" ]; then
-        print_message $YELLOW "⚠️ 启动前发现冲突进程，正在清理..."
-        echo "$conflicting_pids" | while read -r cpid; do
-            if [ -n "$cpid" ]; then
+    # 创建启动锁文件，防止其他脚本干涉
+    local startup_lock="/tmp/finalunlock_startup.lock"
+    if [ -f "$startup_lock" ]; then
+        print_message $YELLOW "⚠️ 检测到其他启动进程正在执行，等待完成..."
+        local wait_count=0
+        while [ -f "$startup_lock" ] && [ $wait_count -lt 30 ]; do
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        if [ -f "$startup_lock" ]; then
+            print_message $RED "⚠️ 启动锁超时，强制清除锁文件"
+            rm -f "$startup_lock"
+        fi
+    fi
+    
+    # 获取启动锁
+    echo $$ > "$startup_lock"
+    print_message $BLUE "🔒 已获取启动锁，开始原子化启动流程..."
+    
+    # 阶段1：发现所有冲突进程
+    print_message $BLUE "🔍 阶段1：扫描所有冲突进程..."
+    local conflicting_pids1=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    local conflicting_pids2=$(ps aux | grep -E "python.*bot\.py" | grep -v grep | awk '{print $2}' 2>/dev/null || true)
+    local all_conflicting_pids="$conflicting_pids1 $conflicting_pids2"
+    
+    # 去重并过滤当前脚本PID
+    local unique_pids=$(echo "$all_conflicting_pids" | tr ' ' '\n' | sort -u | grep -v '^$' | grep -v "^$$\$" || true)
+    
+    # 阶段2：强制终止所有冲突进程
+    if [ -n "$unique_pids" ]; then
+        local pid_count=$(echo "$unique_pids" | wc -l)
+        print_message $YELLOW "💥 阶段2：强制终止 $pid_count 个冲突进程..."
+        
+        echo "$unique_pids" | while read -r cpid; do
+            if [ -n "$cpid" ] && [ "$cpid" != "$$" ]; then
+                print_message $CYAN "   💥 发送KILL信号给 PID: $cpid"
                 kill -9 $cpid 2>/dev/null || true
             fi
         done
-        sleep 1
+        
+        # 阶段3：等待并验证所有进程完全退出
+        print_message $BLUE "⏳ 阶段3：等待所有进程完全退出..."
+        local max_wait=10
+        local wait_time=0
+        
+        while [ $wait_time -lt $max_wait ]; do
+            local remaining_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+            if [ -z "$remaining_pids" ]; then
+                print_message $GREEN "✅ 所有冲突进程已完全退出 (耗时: $((wait_time + 1))秒)"
+                break
+            fi
+            
+            if [ $wait_time -lt $((max_wait - 1)) ]; then
+                local remaining_count=$(echo "$remaining_pids" | wc -w)
+                print_message $YELLOW "⏳ 仍有 $remaining_count 个进程未退出，继续等待... ($((wait_time + 1))/$max_wait)"
+                sleep 1
+                wait_time=$((wait_time + 1))
+            else
+                print_message $RED "⚠️ 超时！仍有进程未完全退出: $remaining_pids"
+                # 最后一次强制清理
+                echo "$remaining_pids" | while read -r rpid; do
+                    kill -9 $rpid 2>/dev/null || true
+                done
+                sleep 1
+                break
+            fi
+        done
+        
+        print_message $GREEN "🎯 清理阶段完成，确保所有冲突进程已终止"
+    else
+        print_message $GREEN "✅ 未发现冲突进程"
     fi
     
-    # 启动机器人
+    # 阶段4：最终验证无残留进程
+    print_message $BLUE "🔍 阶段4：最终验证..."
+    local final_check=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$final_check" ]; then
+        print_message $RED "❌ 发现残留进程: $final_check"
+        print_message $RED "❌ 启动中止，请手动清理后重试"
+        rm -f "$startup_lock"
+        return 1
+    fi
+    
+    print_message $GREEN "✅ 验证通过：无残留进程，可以安全启动"
+    
+    # 阶段5：启动新的机器人实例
+    print_message $BLUE "🚀 阶段5：启动新的机器人实例..."
     print_message $CYAN "💡 日志将实时记录到: $LOG_FILE"
     nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
     local pid=$!
@@ -179,6 +291,10 @@ start_or_restart_bot() {
         print_message $CYAN "💡 机器人已在后台运行，即使退出脚本也会继续运行"
         print_message $CYAN "💡 使用 'fn-bot' 命令可以随时管理机器人"
         print_message $CYAN "📋 实时日志文件: $LOG_FILE"
+        
+        # 释放启动锁
+        rm -f "$startup_lock"
+        print_message $BLUE "🔓 已释放启动锁"
         
         # 显示启动日志
         echo
@@ -199,11 +315,39 @@ start_or_restart_bot() {
         # 启动失败时的二次尝试（自动清理后重试）
         echo
         print_message $YELLOW "🔄 即将进行二次启动尝试..."
-        print_message $CYAN "正在执行更彻底的清理..."
+        
+        # 保持启动锁，防止其他脚本干涉
+        print_message $CYAN "🔒 保持启动锁，执行更彻底的清理..."
         sleep 2
         
         # 执行更彻底的清理
         execute_thorough_cleanup
+        
+        # 额外的冲突进程清理（原子化操作）
+        print_message $BLUE "🔍 二次清理：扫描残留进程..."
+        local extra_pids=$(pgrep -f "bot\.py" 2>/dev/null || true)
+        if [ -n "$extra_pids" ]; then
+            print_message $YELLOW "💥 二次清理：发现 $(echo $extra_pids | wc -w) 个残留进程"
+            echo "$extra_pids" | while read -r epid; do
+                print_message $CYAN "   💥 强制终止残留进程 PID: $epid"
+                kill -9 $epid 2>/dev/null || true
+            done
+            
+            # 等待残留进程完全退出
+            print_message $BLUE "⏳ 等待残留进程完全退出..."
+            sleep 3
+            
+            # 最终验证
+            local final_remaining=$(pgrep -f "bot\.py" 2>/dev/null || true)
+            if [ -n "$final_remaining" ]; then
+                print_message $RED "⚠️ 仍有残留进程无法清理: $final_remaining"
+            else
+                print_message $GREEN "✅ 所有残留进程已清理完成"
+            fi
+        fi
+        
+        print_message $BLUE "⏳ 等待系统状态完全稳定..."
+        sleep 5
         
         print_message $BLUE "🔄 二次启动尝试..."
         nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
@@ -213,11 +357,17 @@ start_or_restart_bot() {
         sleep 3
         if ps -p $retry_pid > /dev/null 2>&1; then
             print_message $GREEN "✅ 二次启动成功 (PID: $retry_pid)"
+            # 释放启动锁
+            rm -f "$startup_lock"
+            print_message $BLUE "🔓 已释放启动锁"
             return 0
         else
             print_message $RED "❌ 二次启动也失败"
             print_message $YELLOW "💡 建议检查配置或查看详细日志"
             rm -f "$PID_FILE"
+            # 释放启动锁
+            rm -f "$startup_lock"
+            print_message $BLUE "🔓 已释放启动锁"
             return 1
         fi
     fi
@@ -434,6 +584,46 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# 全局进程管理器 - 确保只有一个主控程序
+GLOBAL_MANAGER_LOCK="/tmp/finalunlock_global_manager.lock"
+
+acquire_global_control() {
+    local script_name="$1"
+    local timeout=30
+    local wait_time=0
+    
+    # 检查是否有其他主控程序在运行
+    if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+        local existing_controller=$(cat "$GLOBAL_MANAGER_LOCK" 2>/dev/null || echo "unknown")
+        print_message $YELLOW "⚠️ 检测到其他主控程序正在运行: $existing_controller"
+        print_message $YELLOW "⏳ 等待其他主控程序完成..."
+        
+        while [ -f "$GLOBAL_MANAGER_LOCK" ] && [ $wait_time -lt $timeout ]; do
+            sleep 1
+            wait_time=$((wait_time + 1))
+            if [ $((wait_time % 5)) -eq 0 ]; then
+                print_message $YELLOW "⏳ 等待中... ($wait_time/$timeout 秒)"
+            fi
+        done
+        
+        if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+            print_message $RED "⚠️ 等待超时，强制获取控制权"
+            rm -f "$GLOBAL_MANAGER_LOCK"
+        fi
+    fi
+    
+    # 获取全局控制权
+    echo "$script_name (PID: $$)" > "$GLOBAL_MANAGER_LOCK"
+    print_message $BLUE "🔒 已获取全局控制权: $script_name"
+}
+
+release_global_control() {
+    if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+        rm -f "$GLOBAL_MANAGER_LOCK"
+        print_message $BLUE "🔓 已释放全局控制权"
+    fi
+}
 
 # 项目配置
 GITHUB_REPO="https://github.com/xymn2023/FinalUnlock.git"
@@ -4768,4 +4958,10 @@ monitor_menu() {
 }
 
 # 运行主函数
+# 获取全局控制权，确保只有一个主控程序
+acquire_global_control "start.sh"
+
+# 设置退出时释放全局控制权
+trap 'release_global_control; exit' INT TERM EXIT
+
 main

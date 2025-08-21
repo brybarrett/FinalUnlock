@@ -2,32 +2,51 @@
 
 # FinalShell 激活码机器人一键安装命令 v3.0
 
-# 🔒 单实例检查：防止多个安装脚本同时运行导致冲突
-LOCK_FILE="/tmp/finalunlock_install.lock"
+# 🔒 全局进程管理器：防止多个脚本同时运行导致冲突
+GLOBAL_MANAGER_LOCK="/tmp/finalunlock_global_manager.lock"
 
-check_single_instance() {
-    if [ -f "$LOCK_FILE" ]; then
-        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
-        if [ -n "$lock_pid" ] && ps -p $lock_pid > /dev/null 2>&1; then
-            echo -e "\033[0;31m❌ 检测到另一个安装程序正在运行 (PID: $lock_pid)\033[0m"
-            echo -e "\033[0;33m💡 请等待当前安装完成，或者终止其他安装进程后重试\033[0m"
-            echo -e "\033[0;33m💡 如果确认没有其他安装进程，可以删除锁文件: rm -f $LOCK_FILE\033[0m"
-            exit 1
-        else
-            # 清理过期的锁文件
-            rm -f "$LOCK_FILE"
+acquire_global_control() {
+    local script_name="$1"
+    local timeout=30
+    local wait_time=0
+    
+    # 检查是否有其他主控程序在运行
+    if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+        local existing_controller=$(cat "$GLOBAL_MANAGER_LOCK" 2>/dev/null || echo "unknown")
+        echo -e "\033[0;33m⚠️ 检测到其他主控程序正在运行: $existing_controller\033[0m"
+        echo -e "\033[0;33m⏳ 等待其他主控程序完成...\033[0m"
+        
+        while [ -f "$GLOBAL_MANAGER_LOCK" ] && [ $wait_time -lt $timeout ]; do
+            sleep 1
+            wait_time=$((wait_time + 1))
+            if [ $((wait_time % 5)) -eq 0 ]; then
+                echo -e "\033[0;33m⏳ 等待中... ($wait_time/$timeout 秒)\033[0m"
+            fi
+        done
+        
+        if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+            echo -e "\033[0;31m⚠️ 等待超时，强制获取控制权\033[0m"
+            rm -f "$GLOBAL_MANAGER_LOCK"
         fi
     fi
     
-    # 创建锁文件
-    echo $$ > "$LOCK_FILE"
-    
-    # 设置退出时清理锁文件
-    trap 'rm -f "$LOCK_FILE"; exit' INT TERM EXIT
+    # 获取全局控制权
+    echo "$script_name (PID: $$)" > "$GLOBAL_MANAGER_LOCK"
+    echo -e "\033[0;34m🔒 已获取全局控制权: $script_name\033[0m"
 }
 
-# 立即检查单实例
-check_single_instance
+release_global_control() {
+    if [ -f "$GLOBAL_MANAGER_LOCK" ]; then
+        rm -f "$GLOBAL_MANAGER_LOCK"
+        echo -e "\033[0;34m🔓 已释放全局控制权\033[0m"
+    fi
+}
+
+# 立即获取全局控制权
+acquire_global_control "onekey_install.sh"
+
+# 设置退出时释放全局控制权
+trap 'release_global_control; exit' INT TERM EXIT
 
 # 颜色定义
 RED='\033[0;31m'
@@ -754,25 +773,19 @@ auto_start_bot() {
     
     print_message $GREEN "✅ 环境清理完成，启动新的bot进程..."
     
-    # 启动机器人
-    nohup $python_cmd bot.py > bot.log 2>&1 &
-    local bot_pid=$!
+    # 使用统一的启动函数
+    unified_start_bot "$python_cmd" "bot.log" "bot.pid"
+    local result=$?
     
-    echo $bot_pid > bot.pid
-    
-    # 验证启动 - 增加检查时间和详细诊断
-    print_message $YELLOW "🔄 等待机器人启动..."
-    sleep 5
-    
-    if ps -p $bot_pid > /dev/null 2>&1; then
-        print_message $GREEN "✅ 机器人启动成功 (PID: $bot_pid)"
+    if [ $result -eq 0 ]; then
         print_message $CYAN "📋 日志文件: $project_dir/bot.log"
         
         # 额外检查：确保机器人真正连接成功
         print_message $YELLOW "🔄 验证机器人连接状态..."
         sleep 3
         
-        if ps -p $bot_pid > /dev/null 2>&1; then
+        local bot_pid=$(cat bot.pid 2>/dev/null)
+        if [ -n "$bot_pid" ] && ps -p $bot_pid > /dev/null 2>&1; then
             print_message $GREEN "✅ 机器人运行稳定"
             return 0
         else
@@ -781,16 +794,68 @@ auto_start_bot() {
             if [ -f "bot.log" ]; then
                 tail -10 bot.log
             fi
-            rm -f bot.pid
             return 1
         fi
     else
-        print_message $RED "❌ 机器人启动失败"
         print_message $YELLOW "💡 错误日志:"
         if [ -f "bot.log" ]; then
             cat bot.log
         fi
-        rm -f bot.pid
+        return 1
+    fi
+}
+
+# 统一的bot启动函数（带锁机制）
+unified_start_bot() {
+    local python_cmd="$1"
+    local log_file="${2:-bot.log}"
+    local pid_file="${3:-bot.pid}"
+    
+    # 检查启动锁，避免与其他脚本冲突
+    local startup_lock="/tmp/finalunlock_startup.lock"
+    if [ -f "$startup_lock" ]; then
+        print_message $YELLOW "⚠️ 检测到其他启动进程，等待完成..."
+        local wait_count=0
+        while [ -f "$startup_lock" ] && [ $wait_count -lt 30 ]; do
+            sleep 1
+            wait_count=$((wait_count + 1))
+        done
+        if [ -f "$startup_lock" ]; then
+            print_message $RED "⚠️ 启动锁超时，强制清除"
+            rm -f "$startup_lock"
+        fi
+    fi
+    
+    # 获取启动锁
+    echo $$ > "$startup_lock"
+    print_message $BLUE "🔒 已获取启动锁，确保独占启动..."
+    
+    # 清理可能存在的冲突进程
+    local existing_pids=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$existing_pids" ]; then
+        print_message $YELLOW "💥 清理冲突进程: $existing_pids"
+        echo "$existing_pids" | while read -r pid; do
+            kill -9 $pid 2>/dev/null || true
+        done
+        sleep 2
+    fi
+    
+    # 启动机器人
+    nohup $python_cmd bot.py > "$log_file" 2>&1 &
+    local bot_pid=$!
+    echo $bot_pid > "$pid_file"
+    
+    # 验证启动
+    sleep 3
+    if ps -p $bot_pid > /dev/null 2>&1; then
+        print_message $GREEN "✅ 机器人启动成功 (PID: $bot_pid)"
+        # 释放启动锁
+        rm -f "$startup_lock"
+        return 0
+    else
+        print_message $RED "❌ 机器人启动失败"
+        # 释放启动锁
+        rm -f "$startup_lock"
         return 1
     fi
 }
@@ -941,13 +1006,8 @@ final_verification_and_fix() {
                 python_cmd="python"
             fi
             
-            nohup $python_cmd bot.py > bot.log 2>&1 &
-            local new_pid=$!
-            echo $new_pid > bot.pid
-            
-            sleep 3
-            if ps -p $new_pid > /dev/null 2>&1; then
-                print_message $GREEN "✅ bot.py重启成功 (PID: $new_pid)"
+            if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
+                print_message $GREEN "✅ bot.py重启成功"
                 issues_fixed=$((issues_fixed + 1))
             else
                 print_message $RED "❌ bot.py重启失败，请检查日志: cat bot.log"
@@ -973,16 +1033,11 @@ final_verification_and_fix() {
                 python_cmd="python"
             fi
             
-            nohup $python_cmd bot.py > bot.log 2>&1 &
-            local new_pid=$!
-            echo $new_pid > bot.pid
-            
-            sleep 3
-            if ps -p $new_pid > /dev/null 2>&1; then
-                print_message $GREEN "✅ bot.py启动成功 (PID: $new_pid)"
+            if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
+                print_message $GREEN "✅ 新bot进程启动成功"
                 issues_fixed=$((issues_fixed + 1))
             else
-                print_message $RED "❌ bot.py启动失败，请检查日志: cat bot.log"
+                print_message $RED "❌ 新bot进程启动失败"
             fi
         fi
     fi
@@ -1697,15 +1752,10 @@ auto_system_fix() {
                         python_cmd="python"
                     fi
                     
-                    nohup $python_cmd bot.py >> "$log_file" 2>&1 &
-                    local new_pid=$!
-                    echo $new_pid > "$pid_file"
-                    sleep 3
-                    if ps -p $new_pid > /dev/null 2>&1; then
-                        print_message $GREEN "✅ 机器人自动强制重启成功 (PID: $new_pid)"
+                    if unified_start_bot "$python_cmd" "$log_file" "$pid_file"; then
+                        print_message $GREEN "✅ 机器人自动强制重启成功"
                     else
                         print_message $RED "❌ 机器人自动启动失败"
-                        rm -f "$pid_file"
                     fi
                 fi
             else
@@ -2064,17 +2114,14 @@ auto_update_project() {
     # 重启服务
     print_message $CYAN "🚀 重启服务..."
     if [ -f "start.sh" ]; then
-        # 重新启动机器人 - 使用正确的Python命令
+        # 重新启动机器人 - 使用统一启动函数
         local python_cmd="python3"
         if [ -d "venv" ]; then
             source venv/bin/activate
             python_cmd="python"
         fi
-        nohup $python_cmd bot.py > bot.log 2>&1 &
-        echo $! > bot.pid
-        sleep 2
         
-        if ps -p $(cat bot.pid) > /dev/null 2>&1; then
+        if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
             print_message $GREEN "✅ 机器人重启成功"
         else
             print_message $RED "❌ 机器人重启失败"
