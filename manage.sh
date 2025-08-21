@@ -511,21 +511,43 @@ show_logs() {
     clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
         info "📋 实时日志监控"
-        msg "🔥 按回车键返回主菜单 (Ctrl+C已屏蔽) 🔥" "$YELLOW"
+        msg "🔥 按任意键返回主菜单 (Ctrl+C已屏蔽) 🔥" "$YELLOW"
         echo "================================"
         
         # 确保Ctrl+C被屏蔽，即使在日志页面也不能退出
         trap 'handle_ctrl_c' SIGINT
         
-        # 显示最后50行日志，然后等待用户输入
-        tail -n 50 "$INSTALL_DIR/bot.log"
+        # 显示实时日志，支持任意键返回
+        echo "正在显示实时日志，按任意键返回主菜单..."
+        echo ""
+        
+        # 在后台运行tail命令
+        tail -f "$INSTALL_DIR/bot.log" &
+        local tail_pid=$!
+        
+        # 等待用户按任意键 - 使用最兼容的方法
         echo ""
         echo "================================"
+        echo ">>> 按任意键返回主菜单 <<<"
         
-        # 使用简单的 read 命令等待回车键，这在所有环境都能正常工作
-        read -p ">>> 按回车键返回主菜单 <<<"
+        # 尝试多种read方法，确保兼容性
+        if read -t 0.1 -n 1 -s 2>/dev/null; then
+            # 支持 -n 1 -s 参数的Shell
+            read -n 1 -s
+        elif read -t 1 2>/dev/null; then
+            # 支持timeout但不支持-n参数的Shell
+            read -r dummy
+        else
+            # 最基本的read命令
+            read -r dummy
+        fi
+        
+        # 停止tail进程
+        kill $tail_pid 2>/dev/null || true
+        wait $tail_pid 2>/dev/null || true
         
         echo ""
+        echo "================================"
         msg "📋 已返回主菜单"
         sleep 1
         
