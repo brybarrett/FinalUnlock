@@ -616,7 +616,7 @@ async def guard_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 主程序
 # 修复第600-610行的run_polling调用
 def cleanup_existing_instances():
-    """清理可能存在的其他机器人实例 - 严格的先结束后启动逻辑"""
+    """清理可能存在的其他机器人实例（更安全：仅清理同一脚本路径的进程，绝不清理自身）"""
     logger.info("🧹 开始彻底清理其他机器人实例...")
     
     # 创建清理锁文件，防止其他脚本干涉
@@ -633,6 +633,7 @@ def cleanup_existing_instances():
         import time
         
         current_pid = os.getpid()
+        current_script = os.path.abspath(__file__)
         
         # 第一阶段：发现所有需要清理的进程
         target_pids = []
@@ -644,7 +645,8 @@ def cleanup_existing_instances():
                     continue
                     
                 cmdline = ' '.join(proc.info['cmdline'] or [])
-                if 'bot.py' in cmdline:
+                # 仅匹配“当前脚本的绝对路径”，避免误杀包装进程或其他同名脚本
+                if 'bot.py' in cmdline and current_script in cmdline:
                     target_pids.append(proc.info['pid'])
                     logger.warning(f"🎯 发现目标进程 PID: {proc.info['pid']}")
                         
@@ -768,40 +770,8 @@ def cleanup_existing_instances():
 if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
-        
-        # 检查是否在测试模式下运行，如果是则跳过清理
-        if os.environ.get('TESTING_MODE') == 'true':
-            logger.info("🧪 检测到测试模式，跳过进程清理")
-        else:
-            # 阶段1：彻底清理所有冲突实例（原子化操作）
-            logger.info("🚀 阶段1：执行彻底清理...")
-            cleanup_existing_instances()
-        
-        # 阶段2：确保清理完成后再继续
-        logger.info("🔍 阶段2：验证清理结果...")
-        import time
-        time.sleep(3)  # 增加等待时间确保完全退出
-        
-        # 最终验证：确保没有残留进程
-        try:
-            import psutil
-            remaining_bots = []
-            for proc in psutil.process_iter(['pid', 'cmdline']):
-                try:
-                    cmdline = ' '.join(proc.info['cmdline'] or [])
-                    if 'bot.py' in cmdline and proc.info['pid'] != os.getpid():
-                        remaining_bots.append(proc.info['pid'])
-                except:
-                    continue
-            
-            if remaining_bots:
-                logger.error(f"❌ 发现残留bot进程: {remaining_bots}")
-                logger.error("❌ 启动中止，请手动清理后重试")
-                sys.exit(1)
-            else:
-                logger.info("✅ 验证通过：无残留进程")
-        except ImportError:
-            logger.info("⚠️ 无法验证残留进程，继续启动...")
+        # 重要变更：不在启动前主动清理或验证残留进程，避免误杀新启动的自身。
+        # 如遇 Telegram 冲突错误时，再进行有针对性的清理与重试。
         
         # 阶段3：开始初始化新的机器人实例
         logger.info("🤖 阶段3：开始初始化机器人...")
