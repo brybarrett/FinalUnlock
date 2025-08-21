@@ -4400,6 +4400,12 @@ check_and_activate_venv() {
 main() {
     # 检查命令行参数
     if [ "$1" = "--daemon" ]; then
+        # 检查是否在测试模式下，避免干扰测试
+        if [ "${TESTING_MODE:-}" = "true" ]; then
+            print_message $YELLOW "🧪 检测到测试模式，跳过守护进程启动"
+            exit 0
+        fi
+        
         # 守护进程模式，直接启动机器人
         print_message $BLUE "🚀 守护进程模式启动..."
         

@@ -1084,6 +1084,12 @@ final_verification_and_fix() {
         return 0
     fi
     
+    # 检查是否在管理菜单循环中，避免重复执行
+    if [ "${MANAGEMENT_MENU_ACTIVE:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 管理菜单活跃时跳过最终验证和修复"
+        return 0
+    fi
+    
     print_message $BLUE "🔍 最终验证和修复..."
     
     # 查找项目目录
@@ -1383,6 +1389,9 @@ show_management_menu() {
         export TESTING_MODE=""
         export SKIP_AUTO_FIX=""
     fi
+    
+    # 设置标志防止在管理菜单循环中重复执行自动修复
+    export MANAGEMENT_MENU_ACTIVE="true"
     
     while true; do
         echo
@@ -1800,6 +1809,12 @@ auto_system_fix() {
         return 0
     fi
     
+    # 检查是否在管理菜单循环中，避免重复执行
+    if [ "${MANAGEMENT_MENU_ACTIVE:-}" = "true" ]; then
+        print_message $YELLOW "⏭️ 管理菜单活跃时跳过自动系统修复"
+        return 0
+    fi
+    
     print_message $BLUE "🔍 执行系统自动检测和修复..."
     
     # 🔧 简化：直接使用默认项目目录
@@ -1893,8 +1908,8 @@ auto_system_fix() {
             fi
         fi
         
-        # 自动修复3：检查systemd服务
-        if command -v systemctl &> /dev/null; then
+        # 自动修复3：检查systemd服务（测试模式下跳过）
+        if command -v systemctl &> /dev/null && [ "${TESTING_MODE:-}" != "true" ]; then
             if ! systemctl is-enabled finalunlock-bot.service >/dev/null 2>&1; then
                 print_message $YELLOW "🔄 systemd服务未启用，正在自动创建..."
                 # 尝试创建服务（如果有sudo权限）
