@@ -1656,6 +1656,8 @@ show_management_menu() {
                         print_message $RED "❌ 未找到项目目录"
                     fi
                     print_message $GREEN "👋 FinalUnlock已完全卸载"
+                    sleep 1
+                    clear
                     exit 0
                 else
                     print_message $YELLOW "❌ 取消卸载操作"
@@ -1688,6 +1690,8 @@ show_management_menu() {
                 print_message $GREEN "👋 感谢使用FinalUnlock！"
                 print_message $CYAN "💡 使用 'fn-bot' 命令可随时管理机器人"
                 print_message $CYAN "💡 机器人将继续在后台运行"
+                sleep 1
+                clear
                 exit 0
                 ;;
             *)
@@ -2235,6 +2239,8 @@ show_main_menu() {
                 ;;
             0|q|Q)
                 print_message $GREEN "👋 感谢使用 FinalUnlock！"
+                sleep 1
+                clear
                 exit 0
                 ;;
             *)
@@ -2304,7 +2310,8 @@ uninstall_project() {
     print_message $GREEN "🎉 卸载完成！"
     print_message $CYAN "💡 感谢使用 FinalUnlock"
     echo
-    
+    sleep 1
+    clear
     exit 0
 }
 

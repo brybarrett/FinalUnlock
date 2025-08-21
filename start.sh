@@ -552,6 +552,8 @@ uninstall_bot_with_cleanup() {
         fi
         
         print_message $BLUE "👋 FinalUnlock 已完全卸载"
+        sleep 1
+        clear
         exit 0
     else
         print_message $YELLOW "⚠️ 保留项目文件，仅清理了运行进程"
@@ -567,6 +569,7 @@ safe_exit() {
     print_message $CYAN "💡 如果机器人正在运行，它会继续在后台运行"
     print_message $CYAN "💡 使用 'fn-bot' 命令可以随时管理机器人"
     sleep 2
+    clear
     exit 0
 }
 
@@ -1355,8 +1358,23 @@ check_bot_status() {
     fi
 }
 
-# 启动机器人
+# 🎯 智能启动机器人（不强制重启已运行的实例）
 start_bot() {
+    return $(start_bot_with_mode "smart")
+}
+
+# 🔄 强制启动机器人（会重启已运行的实例）
+force_start_bot() {
+    return $(start_bot_with_mode "force")
+}
+
+# 🔧 核心启动函数，支持不同模式
+# 模式说明：
+# - smart: 智能启动，如果已有机器人运行则不重启（用于菜单[1]、fn-bot进入、自动检测修复）
+# - force: 强制启动，会杀死已有机器人进程（用于重启操作、自动监控重启、故障修复）
+start_bot_with_mode() {
+    local mode="${1:-smart}"  # smart | force
+    
     print_message $BLUE "🚀 启动机器人..."
     
     # 检查配置是否完成
@@ -1366,54 +1384,63 @@ start_bot() {
         return 1
     fi
     
-    # 🔧 强制重启逻辑：彻底清理所有bot进程避免冲突
-    print_message $YELLOW "🔄 强制重启模式：彻底清理现有进程..."
+    # 检查是否有机器人在运行
+    local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
     
-    # 方法1：通过PID文件停止
-    if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null)
-        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-            print_message $YELLOW "🔄 停止PID文件中的进程 (PID: $pid)..."
-            kill $pid 2>/dev/null
-            sleep 3
-            if ps -p $pid > /dev/null 2>&1; then
-                print_message $YELLOW "🔄 强制停止进程 (PID: $pid)..."
-                kill -9 $pid 2>/dev/null
-            fi
-        fi
-    fi
-    
-    # 方法2：停止所有bot.py进程（包括可能的僵尸进程）
-    local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-    if [ -n "$bot_pids" ]; then
-        print_message $YELLOW "🔄 发现其他bot进程，正在强制清理..."
-        echo "$bot_pids" | while read -r pid; do
-            if [ -n "$pid" ]; then
-                print_message $YELLOW "   停止进程 PID: $pid"
-                kill $pid 2>/dev/null || true
-            fi
-        done
-        sleep 3
-        
-        # 强制停止仍在运行的进程
-        bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-        if [ -n "$bot_pids" ]; then
-            print_message $YELLOW "🔄 强制停止残留进程..."
-            echo "$bot_pids" | while read -r pid; do
-                if [ -n "$pid" ]; then
-                    kill -9 $pid 2>/dev/null || true
+    if [ -n "$running_bots" ]; then
+        case $mode in
+            "smart")
+                print_message $GREEN "✅ 检测到机器人已在运行 (PID: $running_bots)"
+                
+                # 验证PID文件是否与实际进程一致
+                local first_pid=$(echo "$running_bots" | head -1)
+                echo "$first_pid" > "$PID_FILE"
+                
+                print_message $CYAN "💡 机器人已在后台运行，无需重复启动"
+                print_message $CYAN "💡 如需重启机器人，请使用选项 [r] 重启"
+                return 0
+                ;;
+            "force")
+                print_message $YELLOW "🔄 强制重启模式：停止现有进程..."
+                
+                # 强制清理现有进程
+                echo "$running_bots" | while read -r pid; do
+                    if [ -n "$pid" ]; then
+                        print_message $CYAN "   💥 停止进程 PID: $pid"
+                        kill $pid 2>/dev/null || true
+                    fi
+                done
+                sleep 3
+                
+                # 强制清理残留进程
+                local remaining_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+                if [ -n "$remaining_bots" ]; then
+                    print_message $YELLOW "🔄 强制清理残留进程..."
+                    echo "$remaining_bots" | while read -r pid; do
+                        if [ -n "$pid" ]; then
+                            kill -9 $pid 2>/dev/null || true
+                        fi
+                    done
                 fi
-            done
-        fi
+                
+                # 清理文件
+                rm -f "$PID_FILE"
+                print_message $GREEN "✅ 进程清理完成"
+                ;;
+        esac
     fi
     
-    # 方法3：使用pkill作为最后保险
-    pkill -f "bot.py" 2>/dev/null || true
+    # 启动新的机器人实例
+    print_message $YELLOW "🔄 正在启动新的机器人实例..."
     
-    # 清理PID文件
-    rm -f "$PID_FILE"
-    
-    print_message $GREEN "✅ 进程清理完成，准备启动新进程..."
+    # 清理可能存在的无效PID文件
+    if [ -f "$PID_FILE" ]; then
+        local old_pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$old_pid" ] && ! ps -p $old_pid > /dev/null 2>&1; then
+            print_message $YELLOW "🧹 清理无效的PID文件..."
+            rm -f "$PID_FILE"
+        fi
+    fi
     sleep 2
     
     # 切换到项目目录
@@ -1523,103 +1550,25 @@ start_bot() {
 }
 
 # 停止机器人
+# 🔄 重启机器人（推荐方式：先停止再启动）
+restart_bot() {
+    print_message $BLUE "🔄 重启机器人..."
+    
+    # 先停止现有进程
+    print_message $YELLOW "🛑 停止现有机器人进程..."
+    stop_bot_with_cleanup
+    
+    # 等待一下确保进程完全停止
+    sleep 2
+    
+    # 然后智能启动新进程
+    start_bot
+}
+
 # 🔧 强制重启函数：彻底清理所有bot进程，避免多实例冲突
 force_restart_bot() {
     print_message $BLUE "🔄 强制重启机器人..."
-    
-    # 🔧 第一步：停止所有bot相关进程
-    print_message $YELLOW "🔄 第一步：彻底清理所有bot进程..."
-    
-    # 方法1：通过PID文件停止
-    if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null)
-        if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-            print_message $YELLOW "   停止PID文件中的进程 (PID: $pid)..."
-            kill $pid 2>/dev/null || true
-            sleep 3
-            if ps -p $pid > /dev/null 2>&1; then
-                kill -9 $pid 2>/dev/null || true
-            fi
-        fi
-    fi
-    
-    # 方法2：停止所有bot.py进程
-    local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-    if [ -n "$bot_pids" ]; then
-        print_message $YELLOW "   发现其他bot进程，正在清理..."
-        echo "$bot_pids" | while read -r pid; do
-            if [ -n "$pid" ]; then
-                print_message $YELLOW "     停止进程 PID: $pid"
-                kill $pid 2>/dev/null || true
-            fi
-        done
-        sleep 3
-        
-        # 强制停止残留进程
-        bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-        if [ -n "$bot_pids" ]; then
-            print_message $YELLOW "   强制停止残留进程..."
-            echo "$bot_pids" | while read -r pid; do
-                if [ -n "$pid" ]; then
-                    kill -9 $pid 2>/dev/null || true
-                fi
-            done
-        fi
-    fi
-    
-    # 方法3：pkill清理
-    pkill -f "bot.py" 2>/dev/null || true
-    
-    # 清理文件
-    rm -f "$PID_FILE"
-    
-    print_message $GREEN "   ✅ 进程清理完成"
-    
-    # 🔧 第二步：启动新进程
-    print_message $YELLOW "🔄 第二步：启动新的bot进程..."
-    sleep 2
-    
-    # 直接调用启动逻辑（跳过清理部分）
-    cd "$PROJECT_DIR"
-    
-    # 检查虚拟环境
-    local venv_dir="$PROJECT_DIR/venv"
-    if [ -d "$venv_dir" ]; then
-        source "$venv_dir/bin/activate"
-        # 验证并设置正确的Python命令
-        if [ -x "$venv_dir/bin/python" ]; then
-            PYTHON_CMD="$venv_dir/bin/python"
-        elif [ -x "$venv_dir/bin/python3" ]; then
-            PYTHON_CMD="$venv_dir/bin/python3"
-        elif command -v python &> /dev/null; then
-            PYTHON_CMD="python"
-        else
-            PYTHON_CMD="python3"
-        fi
-    fi
-    
-    # 启动机器人
-    nohup $PYTHON_CMD bot.py >> "$LOG_FILE" 2>&1 &
-    local pid=$!
-    
-    if [ -n "$pid" ]; then
-        echo $pid > "$PID_FILE"
-        print_message $GREEN "✅ 机器人强制重启成功 (PID: $pid)"
-        
-        # 验证启动
-        sleep 3
-    if ps -p $pid > /dev/null 2>&1; then
-            print_message $GREEN "✅ 进程运行正常"
-        else
-            print_message $RED "❌ 进程启动后异常退出，请检查日志"
-        fi
-    else
-        print_message $RED "❌ 强制重启失败"
-    fi
-    
-    echo
-    read -p "按任意键返回..." -n 1 -r
-    echo
+    force_start_bot
 }
 
 stop_bot() {
@@ -3147,52 +3096,8 @@ auto_restart_bot() {
                     done
                 fi
                 
-                # 🔧 强制重启：彻底清理进程避免冲突
-                print_message $YELLOW "🔄 强制清理所有bot进程..."
-                
-                # 方法1：通过PID文件停止
-                if [ -f "$PID_FILE" ]; then
-                    local pid=$(cat "$PID_FILE" 2>/dev/null)
-                    if [ -n "$pid" ] && ps -p $pid > /dev/null 2>&1; then
-                        kill $pid 2>/dev/null || true
-                        sleep 3
-                        if ps -p $pid > /dev/null 2>&1; then
-                            kill -9 $pid 2>/dev/null || true
-                        fi
-                    fi
-                fi
-                
-                # 方法2：停止所有bot.py进程
-                local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-                if [ -n "$bot_pids" ]; then
-                    echo "$bot_pids" | while read -r pid; do
-                        if [ -n "$pid" ]; then
-                            kill $pid 2>/dev/null || true
-                        fi
-                    done
-                    sleep 3
-                    
-                    # 强制停止残留进程
-                    bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-                    if [ -n "$bot_pids" ]; then
-                        echo "$bot_pids" | while read -r pid; do
-                            if [ -n "$pid" ]; then
-                                kill -9 $pid 2>/dev/null || true
-                            fi
-                        done
-                    fi
-                fi
-                
-                # 方法3：pkill清理
-                pkill -f "bot.py" 2>/dev/null || true
-                
-                # 清理PID文件
-                rm -f "$PID_FILE"
-                
-                sleep 3
-                
-                # 重新启动
-                if start_bot_silent; then
+                # 🔧 使用强制启动模式进行自动重启
+                if force_start_bot; then
                     print_message $GREEN "✅ 机器人重启成功"
                     echo "$(date '+%Y-%m-%d %H:%M:%S'): Restart successful" >> "$restart_log"
                     return 0
@@ -4578,27 +4483,36 @@ main() {
         print_message $GREEN "✅ 日志文件已创建"
     fi
     
-    # 自动修复2：检查并启动机器人
+    # 自动修复2：检查并启动机器人（更严格的检查）
     local need_start=0
     if [ -f "$ENV_FILE" ]; then
-        if [ ! -f "$PID_FILE" ]; then
-            need_start=1
+        # 首先检查是否有任何bot进程在运行
+        local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+        
+        if [ -n "$running_bots" ]; then
+            print_message $GREEN "✅ 检测到机器人进程正在运行 (PID: $running_bots)"
+            # 更新PID文件以确保一致性
+            echo "$running_bots" | head -1 > "$PID_FILE"
         else
-            local pid=$(cat "$PID_FILE" 2>/dev/null)
-            if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
+            # 没有运行的bot进程，检查PID文件
+            if [ ! -f "$PID_FILE" ]; then
                 need_start=1
-            fi
-        fi
-        if [ $need_start -eq 1 ]; then
-            print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
-            start_bot
-            if [ $? -eq 0 ]; then
-                print_message $GREEN "✅ 机器人自动启动成功"
             else
-                print_message $RED "❌ 机器人自动启动失败"
+                local pid=$(cat "$PID_FILE" 2>/dev/null)
+                if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
+                    need_start=1
+                fi
             fi
-        else
-            print_message $GREEN "✅ 机器人进程正常运行"
+            
+            if [ $need_start -eq 1 ]; then
+                print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
+                start_bot
+                if [ $? -eq 0 ]; then
+                    print_message $GREEN "✅ 机器人自动启动成功"
+                else
+                    print_message $RED "❌ 机器人自动启动失败"
+                fi
+            fi
         fi
     fi
     
@@ -4671,15 +4585,9 @@ main() {
                     read -p "按回车键继续..."
                     continue
                 fi
-                # 启动/重启机器人前自动清理冲突进程
-                print_message $BLUE "🚀 启动/重启机器人..."
-                print_message $CYAN "正在检查并清理可能的冲突进程..."
-                
-                # 自动清理冲突进程（静默模式）
-                auto_cleanup_before_start
-                
-                # 启动机器人
-                start_or_restart_bot
+                # 智能启动机器人（不强制重启）
+                print_message $BLUE "🚀 启动机器人..."
+                start_bot
                 ;;
             2)
                 print_message $BLUE "🛑 停止机器人..."
@@ -4745,8 +4653,8 @@ main() {
                 ;;
             r|R)
                 print_message $BLUE "🔄 重启机器人..."
-                # 后台使用强制重启逻辑
-                force_restart_bot
+                restart_bot
+                read -p "按回车键继续..." -r
                 ;;
             v|V)
                 echo
@@ -4926,8 +4834,8 @@ monitor_menu() {
                 ;;
             4)
                 print_message $BLUE "🔄 重启机器人..."
-                # 后台使用强制重启逻辑
-                force_restart_bot
+                restart_bot
+                read -p "按任意键继续..." -n 1 -r
                 ;;
             5)
                 if [ -f "$PROJECT_DIR/monitor.log" ]; then
