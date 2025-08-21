@@ -4400,17 +4400,7 @@ check_and_activate_venv() {
 main() {
     # 检查命令行参数
     if [ "$1" = "--daemon" ]; then
-        # 🔒 强制检查所有测试相关模式
-        if [ "${TESTING_MODE:-}" = "true" ] || [ "${FORCE_API_ONLY_TEST:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
-            print_message $YELLOW "🔒 检测到测试模式，强制跳过守护进程启动"
-            exit 0
-        fi
-        
-        # 🔒 检查测试锁文件
-        if [ -f "/tmp/finalunlock_test_api_only.lock" ]; then
-            print_message $YELLOW "🔒 检测到API测试锁，强制跳过守护进程启动"
-            exit 0
-        fi
+
         
         # 守护进程模式，直接启动机器人
         print_message $BLUE "🚀 守护进程模式启动..."
