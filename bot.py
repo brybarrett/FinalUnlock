@@ -769,9 +769,13 @@ if __name__ == '__main__':
     try:
         logger.info("FinalShell 激活码机器人启动中...")
         
-        # 阶段1：彻底清理所有冲突实例（原子化操作）
-        logger.info("🚀 阶段1：执行彻底清理...")
-        cleanup_existing_instances()
+        # 检查是否在测试模式下运行，如果是则跳过清理
+        if os.environ.get('TESTING_MODE') == 'true':
+            logger.info("🧪 检测到测试模式，跳过进程清理")
+        else:
+            # 阶段1：彻底清理所有冲突实例（原子化操作）
+            logger.info("🚀 阶段1：执行彻底清理...")
+            cleanup_existing_instances()
         
         # 阶段2：确保清理完成后再继续
         logger.info("🔍 阶段2：验证清理结果...")
@@ -842,9 +846,12 @@ if __name__ == '__main__':
             try:
                 if attempt > 0:
                     logger.info(f"第 {attempt + 1} 次尝试启动机器人...")
-                    # 每次重试前都强制清理
-                    cleanup_existing_instances()
-                    time.sleep(3)
+                    # 每次重试前都强制清理（测试模式下跳过）
+                    if os.environ.get('TESTING_MODE') != 'true':
+                        cleanup_existing_instances()
+                        time.sleep(3)
+                    else:
+                        logger.info("🧪 测试模式下跳过重试清理")
                 
                 app.run_polling(
                     drop_pending_updates=True,
@@ -861,14 +868,18 @@ if __name__ == '__main__':
                     logger.error(f"错误详情: {e}")
                     
                     if attempt < max_attempts - 1:
-                        logger.info("🔧 正在执行强制清理...")
-                        
-                        # 立即强制清理
-                        cleanup_existing_instances()
-                        
-                        # 增加等待时间确保Telegram API状态重置
-                        logger.info("⏳ 等待Telegram API状态重置...")
-                        time.sleep(8)  # 增加等待时间
+                        # 测试模式下跳过强制清理
+                        if os.environ.get('TESTING_MODE') != 'true':
+                            logger.info("🔧 正在执行强制清理...")
+                            
+                            # 立即强制清理
+                            cleanup_existing_instances()
+                            
+                            # 增加等待时间确保Telegram API状态重置
+                            logger.info("⏳ 等待Telegram API状态重置...")
+                            time.sleep(8)  # 增加等待时间
+                        else:
+                            logger.info("🧪 测试模式下跳过冲突清理，直接重试")
                         
                         logger.info(f"🔄 准备第 {attempt + 2} 次启动尝试...")
                     else:

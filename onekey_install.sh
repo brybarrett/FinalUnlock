@@ -714,8 +714,8 @@ auto_start_bot() {
     fi
     
     # 检查配置值是否为空
-    bot_token=$(grep "BOT_TOKEN=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
-    chat_id=$(grep "CHAT_ID=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
+    bot_token=$(grep "BOT_TOKEN=" .env | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
+    chat_id=$(grep "CHAT_ID=" .env | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
     
     if [ -z "$bot_token" ]; then
         print_message $RED "❌ BOT_TOKEN 为空，请配置有效的机器人Token"
@@ -995,9 +995,9 @@ safe_test_bot_function() {
     local CHAT_ID=""
     
     if [ -f "$project_dir/.env" ]; then
-        # 使用grep而不是source来读取环境变量，避免执行任何命令
-        BOT_TOKEN=$(grep "^BOT_TOKEN=" "$project_dir/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
-        CHAT_ID=$(grep "^CHAT_ID=" "$project_dir/.env" | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || echo "")
+        # 使用更安全的方法读取环境变量，绝对不执行任何命令
+        BOT_TOKEN=$(grep "^BOT_TOKEN=" "$project_dir/.env" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
+        CHAT_ID=$(grep "^CHAT_ID=" "$project_dir/.env" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
     fi
     
     if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
@@ -1127,11 +1127,16 @@ final_verification_and_fix() {
                 python_cmd="python"
             fi
             
-            if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
-                print_message $GREEN "✅ bot.py重启成功"
-                issues_fixed=$((issues_fixed + 1))
+            # 测试模式下不启动新的bot进程
+            if [ "${TESTING_MODE:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+                print_message $YELLOW "🧪 测试模式下跳过bot重启"
             else
-                print_message $RED "❌ bot.py重启失败，请检查日志: cat bot.log"
+                if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
+                    print_message $GREEN "✅ bot.py重启成功"
+                    issues_fixed=$((issues_fixed + 1))
+                else
+                    print_message $RED "❌ bot.py重启失败，请检查日志: cat bot.log"
+                fi
             fi
         fi
     else
@@ -1154,11 +1159,16 @@ final_verification_and_fix() {
                 python_cmd="python"
             fi
             
-            if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
-                print_message $GREEN "✅ 新bot进程启动成功"
-                issues_fixed=$((issues_fixed + 1))
+            # 测试模式下不启动新的bot进程
+            if [ "${TESTING_MODE:-}" = "true" ] || [ "${NO_PROCESS_CLEANUP:-}" = "true" ]; then
+                print_message $YELLOW "🧪 测试模式下跳过bot启动"
             else
-                print_message $RED "❌ 新bot进程启动失败"
+                if unified_start_bot "$python_cmd" "bot.log" "bot.pid"; then
+                    print_message $GREEN "✅ 新bot进程启动成功"
+                    issues_fixed=$((issues_fixed + 1))
+                else
+                    print_message $RED "❌ 新bot进程启动失败"
+                fi
             fi
         fi
     fi

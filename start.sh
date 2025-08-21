@@ -2268,8 +2268,9 @@ validate_configuration() {
         return 1
     fi
     
-    # 读取配置
-    source "$ENV_FILE"
+    # 安全地读取配置，避免执行任何命令
+    BOT_TOKEN=$(grep "^BOT_TOKEN=" "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
+    CHAT_ID=$(grep "^CHAT_ID=" "$ENV_FILE" | head -1 | cut -d'=' -f2- | sed 's/^["'\'']//' | sed 's/["'\'']$//' | tr -d '\n' | tr -d '\r')
     
     # 验证Bot Token
     print_message $YELLOW "🔑 验证 Bot Token..."
