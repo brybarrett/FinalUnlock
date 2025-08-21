@@ -1357,8 +1357,19 @@ EOF
     return 0
 }
 
-# 检查机器人状态
+# 检查机器人状态（智能检测）
 check_bot_status() {
+    # 🔧 智能状态检测：优先检查实际运行的进程
+    local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$running_bots" ]; then
+        # 有bot进程在运行，同步PID文件
+        local first_pid=$(echo "$running_bots" | head -1)
+        echo "$first_pid" > "$PID_FILE" 2>/dev/null || true
+        echo "running"
+        return 0
+    fi
+    
+    # 如果没有实际进程，检查PID文件
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ -n "$pid" ]; then
@@ -1370,6 +1381,8 @@ check_bot_status() {
                 echo "running"
                 return 0
             else
+                # PID文件中的进程已不存在，清理无效文件
+                rm -f "$PID_FILE" 2>/dev/null || true
                 echo "stopped"
                 return 0
             fi
