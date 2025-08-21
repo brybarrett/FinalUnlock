@@ -45,8 +45,8 @@ release_global_control() {
 # 立即获取全局控制权
 acquire_global_control "onekey_install.sh"
 
-# 设置退出时释放全局控制权
-trap 'release_global_control; exit' INT TERM EXIT
+# 设置退出时仅释放全局控制权，不影响已启动的bot进程
+trap 'release_global_control' INT TERM EXIT
 
 # 颜色定义
 RED='\033[0;31m'
@@ -724,49 +724,17 @@ auto_start_bot() {
     
     print_message $GREEN "✅ 配置验证通过，启动机器人..."
     
-    # ✅ 关键修复：停止所有运行中的bot进程，避免冲突
-    print_message $YELLOW "🔄 检查并停止现有bot进程..."
-    
-    # 方法1：通过PID文件停止
-    if [ -f "bot.pid" ]; then
-        local old_pid=$(cat bot.pid 2>/dev/null)
-        if [ -n "$old_pid" ] && ps -p $old_pid > /dev/null 2>&1; then
-            print_message $YELLOW "🔄 停止现有bot进程 (PID: $old_pid)..."
-            kill $old_pid 2>/dev/null
-            sleep 3
-            if ps -p $old_pid > /dev/null 2>&1; then
-                kill -9 $old_pid 2>/dev/null
-            fi
-        fi
+    # 🔧 使用智能启动逻辑：检查是否已有机器人在运行
+    local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
+    if [ -n "$running_bots" ]; then
+        print_message $GREEN "✅ 检测到机器人已在运行 (PID: $running_bots)"
+        local first_pid=$(echo "$running_bots" | head -1)
+        echo "$first_pid" > "bot.pid"
+        print_message $CYAN "💡 机器人已在后台运行，无需重复启动"
+        return 0
     fi
     
-    # 方法2：停止所有bot.py进程
-    local bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-    if [ -n "$bot_pids" ]; then
-        print_message $YELLOW "🔄 发现其他bot进程，正在停止..."
-        echo "$bot_pids" | while read -r pid; do
-            if [ -n "$pid" ]; then
-                print_message $YELLOW "   停止进程 PID: $pid"
-                kill $pid 2>/dev/null
-            fi
-        done
-        sleep 3
-        
-        # 强制停止仍在运行的进程
-        bot_pids=$(pgrep -f "python.*bot.py" 2>/dev/null || true)
-        if [ -n "$bot_pids" ]; then
-            echo "$bot_pids" | while read -r pid; do
-                if [ -n "$pid" ]; then
-                    kill -9 $pid 2>/dev/null
-                fi
-            done
-        fi
-    fi
-    
-    # 清理旧的日志和PID文件
-    rm -f bot.log bot.pid
-    
-    print_message $GREEN "✅ 环境清理完成，启动新的bot进程..."
+    print_message $YELLOW "🔄 机器人未运行，正在启动新实例..."
     
     # 使用统一的启动函数
     unified_start_bot "$python_cmd" "bot.log" "bot.pid"
@@ -854,8 +822,16 @@ unified_start_bot() {
         fi
     fi
     
-    # 启动机器人
-    nohup $python_cmd bot.py > "$log_file" 2>&1 &
+    # 启动机器人 - 使用setsid完全分离进程
+    if command -v setsid >/dev/null 2>&1; then
+        # 使用setsid创建新的会话，完全脱离父进程
+        setsid $python_cmd bot.py > "$log_file" 2>&1 &
+    else
+        # 回退到nohup + disown方式
+        nohup $python_cmd bot.py > "$log_file" 2>&1 &
+        disown  # 从作业控制中移除
+    fi
+    
     local bot_pid=$!
     echo $bot_pid > "$pid_file"
     

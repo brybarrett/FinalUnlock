@@ -4508,35 +4508,23 @@ main() {
         print_message $GREEN "✅ 日志文件已创建"
     fi
     
-    # 自动修复2：检查并启动机器人（更严格的检查）
-    local need_start=0
+    # 自动修复2：检查并启动机器人（智能检测）
     if [ -f "$ENV_FILE" ]; then
-        # 首先检查是否有任何bot进程在运行
+        # 检查是否有任何bot进程在运行
         local running_bots=$(pgrep -f "python.*bot\.py" 2>/dev/null || true)
         
         if [ -n "$running_bots" ]; then
             print_message $GREEN "✅ 检测到机器人进程正在运行 (PID: $running_bots)"
-            # 更新PID文件以确保一致性
-            echo "$running_bots" | head -1 > "$PID_FILE"
+            # 同步PID文件以确保一致性
+            local first_pid=$(echo "$running_bots" | head -1)
+            echo "$first_pid" > "$PID_FILE"
         else
-            # 没有运行的bot进程，检查PID文件
-            if [ ! -f "$PID_FILE" ]; then
-                need_start=1
+            print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
+            start_bot
+            if [ $? -eq 0 ]; then
+                print_message $GREEN "✅ 机器人自动启动成功"
             else
-                local pid=$(cat "$PID_FILE" 2>/dev/null)
-                if [ -z "$pid" ] || ! ps -p $pid > /dev/null 2>&1; then
-                    need_start=1
-                fi
-            fi
-            
-            if [ $need_start -eq 1 ]; then
-                print_message $YELLOW "🔄 机器人未运行，正在自动启动..."
-                start_bot
-                if [ $? -eq 0 ]; then
-                    print_message $GREEN "✅ 机器人自动启动成功"
-                else
-                    print_message $RED "❌ 机器人自动启动失败"
-                fi
+                print_message $RED "❌ 机器人自动启动失败"
             fi
         fi
     fi
