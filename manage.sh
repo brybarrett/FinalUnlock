@@ -511,26 +511,21 @@ show_logs() {
     clear
     if [[ -f "$INSTALL_DIR/bot.log" ]]; then
         info "📋 实时日志监控"
-        msg "🔥 按任意键返回主菜单 (Ctrl+C已屏蔽) 🔥" "$YELLOW"
+        msg "🔥 按回车键返回主菜单 (Ctrl+C已屏蔽) 🔥" "$YELLOW"
         echo "================================"
         
         # 确保Ctrl+C被屏蔽，即使在日志页面也不能退出
         trap 'handle_ctrl_c' SIGINT
         
-        # 在后台启动tail，获取其PID
-        tail -f "$INSTALL_DIR/bot.log" &
-        local tail_pid=$!
-        
-        # 等待用户按任意键（非Ctrl+C）
-        echo ""
-        read -n 1 -s -p ">>> 按任意键返回主菜单 <<<"
-        
-        # 杀死tail进程
-        kill $tail_pid 2>/dev/null || true
-        wait $tail_pid 2>/dev/null || true
-        
+        # 显示最后50行日志，然后等待用户输入
+        tail -n 50 "$INSTALL_DIR/bot.log"
         echo ""
         echo "================================"
+        
+        # 使用简单的 read 命令等待回车键，这在所有环境都能正常工作
+        read -p ">>> 按回车键返回主菜单 <<<"
+        
+        echo ""
         msg "📋 已返回主菜单"
         sleep 1
         
@@ -675,54 +670,85 @@ show_menu() {
 # 更新代码
 update_code() {
     info "更新代码..."
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || { error "无法进入安装目录"; return 1; }
     
     # 备份配置和当前代码
     cp .env .env.backup 2>/dev/null || true
     cp bot.py bot.py.backup 2>/dev/null || true
     
-    # 尝试从GitHub下载最新代码
-    if curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/bot.py > bot.py.new 2>/dev/null && [[ -s bot.py.new ]]; then
-        # 下载成功，替换文件
-        curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/py.py > py.py.new
-        curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/requirements.txt > requirements.txt.new
-        curl -s https://raw.githubusercontent.com/xymn2023/FinalUnlock/main/manage.sh > manage.sh.new
-        
-        # 检查下载的文件是否有效
-        if [[ -s bot.py.new ]] && [[ -s py.py.new ]] && [[ -s requirements.txt.new ]]; then
-            mv bot.py.new bot.py
-            mv py.py.new py.py
-            mv requirements.txt.new requirements.txt
-            
-            if [[ -s manage.sh.new ]]; then
-                mv manage.sh.new manage.sh
-                chmod +x manage.sh
+    info "正在从GitHub下载最新代码..."
+    msg "仓库地址: https://github.com/xymn2023/FinalUnlock"
+    
+    # 下载文件列表
+    local files=("bot.py" "py.py" "requirements.txt" "manage.sh")
+    local base_url="https://raw.githubusercontent.com/xymn2023/FinalUnlock/main"
+    local download_success=true
+    
+    # 逐个下载文件
+    for file in "${files[@]}"; do
+        info "下载 $file..."
+        if curl -f -s -L "$base_url/$file" > "${file}.new" 2>/dev/null; then
+            if [[ -s "${file}.new" ]]; then
+                # 检查文件内容是否有效（不是404页面）
+                if ! grep -q "404" "${file}.new" && ! grep -q "Not Found" "${file}.new"; then
+                    msg "✅ $file 下载成功"
+                else
+                    error "❌ $file 下载失败：文件不存在"
+                    download_success=false
+                fi
+            else
+                error "❌ $file 下载失败：文件为空"
+                download_success=false
             fi
-            
-            msg "✅ 代码更新成功"
         else
-            warn "⚠️ 下载的文件无效，恢复备份"
-            rm -f *.new 2>/dev/null || true
-            cp bot.py.backup bot.py 2>/dev/null || true
+            error "❌ $file 下载失败：网络错误"
+            download_success=false
         fi
+    done
+    
+    if [[ "$download_success" == true ]]; then
+        # 替换文件
+        info "替换文件..."
+        for file in "${files[@]}"; do
+            if [[ -f "${file}.new" ]]; then
+                mv "${file}.new" "$file"
+                [[ "$file" == "manage.sh" ]] && chmod +x "$file"
+                msg "✅ $file 已更新"
+            fi
+        done
+        
+        # 恢复配置文件
+        cp .env.backup .env 2>/dev/null || true
+        
+        # 更新Python依赖
+        if [[ -f venv/bin/activate ]]; then
+            info "更新Python依赖..."
+            source venv/bin/activate
+            pip install -r requirements.txt -q
+            msg "✅ 依赖更新完成"
+        elif [[ -f venv/Scripts/activate ]]; then
+            info "更新Python依赖..."
+            source venv/Scripts/activate
+            pip install -r requirements.txt -q
+            msg "✅ 依赖更新完成"
+        else
+            warn "⚠️ 虚拟环境不存在，跳过依赖更新"
+        fi
+        
+        msg "✅ 代码更新成功！"
+        
+        # 重启服务
+        restart_service
+        
     else
-        warn "⚠️ 无法连接到GitHub或下载失败"
+        warn "⚠️ 更新失败，恢复备份文件"
+        # 清理失败的下载文件
         rm -f *.new 2>/dev/null || true
+        # 恢复备份
+        cp bot.py.backup bot.py 2>/dev/null || true
+        cp .env.backup .env 2>/dev/null || true
+        error "❌ 代码更新失败，请检查网络连接或稍后重试"
     fi
-    
-    # 恢复配置
-    cp .env.backup .env 2>/dev/null || true
-    
-    # 更新依赖
-    if [[ -f venv/bin/activate ]]; then
-        source venv/bin/activate
-        pip install -r requirements.txt -q
-    else
-        warn "⚠️ 虚拟环境不存在，跳过依赖更新"
-    fi
-    
-    # 重启服务
-    restart_service
     
     msg "✅ 更新完成"
 }
