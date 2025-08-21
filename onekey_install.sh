@@ -2255,6 +2255,18 @@ auto_update_project() {
     return 0
 }
 
+# 显示头部信息
+show_header() {
+    echo
+    print_message $PURPLE "================================"
+    print_message $PURPLE "  FinalShell 激活码机器人一键安装"
+    print_message $PURPLE "     完美版本 v7.0"
+    print_message $PURPLE "================================"
+    print_message $CYAN "项目地址: https://github.com/xymn2023/FinalUnlock"
+    print_message $CYAN "静默安装 + 自动清理 + 智能配置 + 自动启动"
+    echo
+}
+
 # 主菜单
 show_main_menu() {
     while true; do
