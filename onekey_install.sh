@@ -1788,8 +1788,6 @@ auto_system_fix() {
                         print_message $RED "❌ 机器人启动失败"
                     fi
                 fi
-            else
-                print_message $GREEN "✅ 机器人进程正常运行"
             fi
         fi
         
