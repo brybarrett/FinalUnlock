@@ -76,8 +76,9 @@ def signal_handler(signum, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-# 加载 .env 文件
-load_dotenv()
+# 加载 .env 文件（固定为脚本所在目录的 .env，避免工作目录不同导致读取错误）
+_ENV_PATH = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path=_ENV_PATH)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
@@ -776,6 +777,29 @@ if __name__ == '__main__':
         # 阶段3：开始初始化新的机器人实例
         logger.info("🤖 阶段3：开始初始化机器人...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+        # 在启动轮询前，确保未设置Webhook（否则会导致409 Conflict）
+        async def _preflight_delete_webhook(bot):
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+                info = await bot.get_webhook_info()
+                if getattr(info, 'url', ''):
+                    logger.warning(f"Webhook仍存在: {info.url}，再次尝试删除...")
+                    await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ 已确保未设置Webhook，准备开始轮询")
+            except Exception as e:
+                logger.warning(f"删除Webhook失败或无需删除: {e}")
+
+        import asyncio as _asyncio
+        try:
+            _asyncio.run(_preflight_delete_webhook(app.bot))
+        except RuntimeError:
+            # 已有事件循环时的兼容处理
+            loop = _asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_preflight_delete_webhook(app.bot))
+            finally:
+                loop.close()
         
         # 创建PID文件
         create_pid_file()
@@ -853,11 +877,11 @@ if __name__ == '__main__':
                         
                         logger.info(f"🔄 准备第 {attempt + 2} 次启动尝试...")
                     else:
-                        logger.error("❌ 多次重试后仍然冲突！")
-                        logger.error("💡 建议手动运行以下命令进行彻底清理:")
-                        logger.error("   bash fix_conflict.sh")
-                        logger.error("   或者重启系统后再试")
-                        raise
+                        logger.error("❌ 多次重试后仍然冲突，改为优雅退出，避免与其他实例互相争抢。")
+                        try:
+                            remove_pid_file()
+                        finally:
+                            sys.exit(0)
                 else:
                     # 非冲突错误，直接抛出
                     logger.error(f"机器人启动出错: {e}")
